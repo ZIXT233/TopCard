@@ -1,0 +1,111 @@
+"use client";
+
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
+
+export type CardFocusBannerHandle = {
+  setPosition: (position: number, moving: boolean) => void;
+};
+
+type BannerCard = {
+  id: string;
+  title: string;
+  host: string;
+  workspace: string;
+  remote: boolean;
+};
+
+export const CardFocusBanner = forwardRef<CardFocusBannerHandle, {
+  cards: BannerCard[];
+  position: number;
+  label: string;
+}>(function CardFocusBanner({ cards, position, label }, forwardedRef) {
+  const rootRef = useRef<HTMLElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const frameTrackRef = useRef<HTMLDivElement>(null);
+  const positionRef = useRef(position);
+  const cardsRef = useRef(cards);
+  cardsRef.current = cards;
+  const zoneWidthRef = useRef(180);
+  const collapseTimerRef = useRef<number | null>(null);
+  const cardsKey = JSON.stringify(cards.map((card) => [card.id, card.title]));
+  const cardsKeyRef = useRef(cardsKey);
+  if (cardsKeyRef.current !== cardsKey) {
+    cardsKeyRef.current = cardsKey;
+    positionRef.current = position;
+  }
+
+  const applyPosition = useCallback((nextPosition: number, moving = false) => {
+    positionRef.current = nextPosition;
+    const root = rootRef.current;
+    const track = trackRef.current;
+    if (!root || !track) return;
+    if (moving) {
+      if (collapseTimerRef.current !== null) {
+        window.clearTimeout(collapseTimerRef.current);
+        collapseTimerRef.current = null;
+      }
+      root.classList.remove("is-collapsing");
+      root.classList.add("is-scrolling");
+    } else if (root.classList.contains("is-scrolling")) {
+      root.classList.remove("is-scrolling");
+      root.classList.add("is-collapsing");
+      collapseTimerRef.current = window.setTimeout(() => {
+        collapseTimerRef.current = null;
+        root.classList.remove("is-collapsing");
+      }, 440);
+    }
+    const offset = -(nextPosition + .5) * zoneWidthRef.current;
+    track.style.transform = `translate3d(${offset}px, 0, 0)`;
+    if (frameTrackRef.current) frameTrackRef.current.style.transform = `translate3d(${offset}px, 0, 0)`;
+  }, []);
+
+  useImperativeHandle(forwardedRef, () => ({ setPosition: applyPosition }), [applyPosition]);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const sample = trackRef.current?.querySelector("strong");
+    if (root && sample) {
+      const context = document.createElement("canvas").getContext("2d");
+      if (context) {
+        context.font = getComputedStyle(sample).font;
+        const averageTitleWidth = cardsRef.current.reduce((total, card) => total + context.measureText(card.title).width, 0) / cardsRef.current.length;
+        zoneWidthRef.current = Math.round(Math.max(160, Math.min(240, (averageTitleWidth + 120) / 2)));
+      }
+      root.style.setProperty("--cq-focus-zone-width", `${zoneWidthRef.current}px`);
+      root.style.setProperty("--cq-focus-zone-half-width", `${zoneWidthRef.current / 2}px`);
+    }
+    applyPosition(positionRef.current, false);
+  }, [cardsKey, applyPosition]);
+
+  useEffect(() => () => {
+    if (collapseTimerRef.current !== null) window.clearTimeout(collapseTimerRef.current);
+  }, []);
+
+  const renderTape = (keyPrefix: string) => cards.map((card) => <div className="cq-focus-banner-copy" key={`${keyPrefix}-${card.id}`}>
+    <strong>{card.title}</strong>
+    <span className="cq-focus-banner-meta">
+      <span><WorkspaceMachineIcon name={card.remote ? "remote" : "local"} size={15} />{card.host}</span>
+      <span><WorkspaceMachineIcon name="folder" size={15} />{card.workspace}</span>
+    </span>
+  </div>);
+
+  return (
+    <section className="cq-focus-banner" aria-label={label} ref={rootRef}>
+      <div className="cq-focus-banner-viewport">
+        <div className="cq-focus-banner-track" ref={trackRef}>
+          {renderTape("outer")}
+        </div>
+        <span className="cq-focus-banner-wing cq-focus-banner-wing-left" aria-hidden="true" />
+        <span className="cq-focus-banner-wing cq-focus-banner-wing-right" aria-hidden="true" />
+        <div className="cq-focus-banner-frame" aria-hidden="true">
+          <div className="cq-focus-banner-frame-aperture">
+            <div className="cq-focus-banner-track" ref={frameTrackRef}>
+              {renderTape("frame")}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+});

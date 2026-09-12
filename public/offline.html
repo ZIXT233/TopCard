@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f1f2ef" />
+    <title>TopCard is offline</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f1f2ef;
+        color: #303731;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+      }
+
+      main {
+        width: min(100%, 420px);
+        text-align: center;
+      }
+
+      img {
+        width: 88px;
+        height: 88px;
+        margin-bottom: 24px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      p {
+        margin: 0;
+        color: #9ca3af;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      button {
+        margin-top: 24px;
+        min-height: 40px;
+        padding: 0 18px;
+        border: 1px solid #cfd4c8;
+        border-radius: 8px;
+        background: #68735e;
+        color: #fffdf7;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #596650;
+      }
+
+      button:focus-visible {
+        outline: 2px solid #68735e;
+        outline-offset: 3px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root { background: #191d19; color: #eef0ea; }
+        p { color: #aab1a6; }
+        button { border-color: #778170; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/topcard-192.png" alt="" />
+      <h1>TopCard is offline</h1>
+      <p>Reconnect to the local TopCard server, then try again.</p>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

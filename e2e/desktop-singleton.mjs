@@ -1,0 +1,14 @@
+import { _electron } from 'playwright';
+import { resolve } from 'node:path';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+(async()=>{const data=fs.mkdtempSync('/tmp/topcard-singleton-');const id='00000000-0000-4000-8000-000000000001';fs.mkdirSync(data+'/.topcard');fs.writeFileSync(data+'/.topcard/queue.json',JSON.stringify({version:1,revision:1,order:[id],workspaces:[],cards:[{id,cwd:'/tmp',session:null,phase:'attention',createdAt:1,detached:{owner:'old-browser',expiresAt:Date.now()+120000},harness:{kind:'codex',title:'Singleton test',terminalId:'00000000000000000000000000000000',state:'exited',version:'test'}}]}));
+const app=await _electron.launch({...(process.env.TEST_APP?{executablePath:process.env.TEST_APP,args:[]}:{args:[resolve('.')]}),env:{...process.env,ELECTRON_RUN_AS_NODE:'',TOPCARD_DESKTOP_USER_DATA:data}});try{
+const main=await app.firstWindow();main.setDefaultTimeout(15000);await main.waitForURL(/127/);await main.waitForFunction(()=>!!window.topcardDesktop);const queue=()=>main.evaluate(async()=>await(await fetch('/api/card-queue')).json());assert.equal((await queue()).cards[0].detached,undefined);
+const p=app.waitForEvent('window');await main.evaluate(id=>window.topcardDesktop.openCard(id),id);const card=await p;card.setDefaultTimeout(15000);await card.waitForURL(new RegExp(id));await card.waitForFunction(()=>document.title==='Codex · Singleton test');await card.waitForFunction(()=>!document.body.innerText.includes('正在接入会话'));
+let q=await queue();const owner=q.cards[0].detached.owner;assert.equal(await card.evaluate(()=>window.topcardDesktop.owner),owner);await card.reload();await card.waitForFunction(()=>document.title==='Codex · Singleton test');await card.waitForTimeout(500);assert.equal((await queue()).cards[0].detached.owner,owner);assert.equal(await card.getByText('该卡片已经在另一个标签页打开',{exact:false}).count(),0);
+await main.evaluate(id=>{window.open(location.origin,'duplicate-main');window.open(location.origin+'/?card='+id,'duplicate-card');window.open('','card-'+id)},id);await main.waitForTimeout(300);assert.equal(app.windows().length,2);
+await card.close();await main.waitForFunction(async()=>!(await(await fetch('/api/card-queue')).json()).cards[0].detached);
+const p2=app.waitForEvent('window');await main.evaluate(id=>window.topcardDesktop.openCard(id),id);const card2=await p2;await card2.waitForFunction(()=>document.title==='Codex · Singleton test');await card2.waitForTimeout(300);assert.notEqual((await queue()).cards[0].detached.owner,owner);assert.equal(app.windows().length,2);
+console.log('PASS stale lease cleanup; real card claim; stable reload owner; unique main/card windows; close release; immediate reopen');
+}finally{await app.close();fs.rmSync(data,{recursive:true,force:true})}})().catch(e=>{console.error(e);process.exit(1)});

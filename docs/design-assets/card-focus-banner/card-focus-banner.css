@@ -1,0 +1,24 @@
+.cq-focus-banner{--cq-focus-zone-width:180px;--cq-focus-zone-half-width:90px;position:absolute;left:50%;top:12px;z-index:29;width:min(var(--cq-focus-zone-width),calc(100% - 270px));height:52px;padding:0;transform:translateX(-50%);overflow:hidden;border:0;border-radius:10px;background:transparent;color:var(--cq-ink);box-shadow:none;pointer-events:none;transition:width 440ms cubic-bezier(.2,.7,.2,1)}
+.cq-focus-banner.is-scrolling{width:min(calc(var(--cq-focus-zone-width) * 6),calc(100% - 120px))}
+.cq-focus-banner-viewport{position:relative;isolation:isolate;width:100%;height:100%;overflow:hidden;border:0;border-radius:inherit;background:#fff;perspective:760px}
+.cq-focus-banner-viewport::after{position:absolute;z-index:1;inset:0;border-block:1px solid #cdd2ca;content:"";pointer-events:none}
+.cq-focus-banner:is(.is-scrolling,.is-collapsing) .cq-focus-banner-viewport{-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 7%,#000 93%,transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 7%,#000 93%,transparent 100%)}
+.cq-focus-banner-track{position:absolute;left:50%;top:0;display:flex;width:max-content;height:100%;will-change:transform}
+.cq-focus-banner-frame{position:absolute;z-index:3;top:0;bottom:0;left:50%;width:min(var(--cq-focus-zone-width),100%);transform:translateX(-50%);background:var(--cq-surface);pointer-events:none}
+.cq-focus-banner:is(.is-scrolling,.is-collapsing) .cq-focus-banner-frame{background:#cfd2cf}
+.cq-focus-banner-frame::before{position:absolute;z-index:0;inset:0;border-block:1px solid #cdd2ca;content:"";pointer-events:none}
+.cq-focus-banner-frame-aperture{position:absolute;z-index:1;inset:0;overflow:hidden;border:1px solid #c5cac2;border-radius:10px;background:#fff}
+.cq-focus-banner-frame-aperture::after{position:absolute;z-index:2;inset:0;border-radius:inherit;background:linear-gradient(180deg,#26312470 0,#2631242b 4px,transparent 14px),linear-gradient(90deg,#26312461 0,#26312424 4px,transparent 14px);content:"";pointer-events:none}
+.cq-focus-banner-wing{position:absolute;z-index:2;top:0;bottom:0;width:calc(50% - var(--cq-focus-zone-half-width));opacity:0;border:0;backface-visibility:hidden;transition:transform 440ms cubic-bezier(.2,.7,.2,1),opacity 180ms ease;pointer-events:none}
+.cq-focus-banner-wing-left{left:0;transform:rotateY(-68deg) scaleX(.18);transform-origin:right center;background:linear-gradient(90deg,#26312428 0%,#26312438 100%)}
+.cq-focus-banner-wing-right{right:0;transform:rotateY(68deg) scaleX(.18);transform-origin:left center;background:linear-gradient(270deg,#26312428 0%,#26312438 100%)}
+.cq-focus-banner:is(.is-scrolling,.is-collapsing) .cq-focus-banner-wing{transform:rotateY(0) scaleX(1);opacity:1}
+.cq-focus-banner.is-collapsing .cq-focus-banner-wing{transition:none}
+.cq-focus-banner-copy{position:relative;display:flex;flex:0 0 var(--cq-focus-zone-width);width:var(--cq-focus-zone-width);height:100%;flex-direction:column;align-items:center;justify-content:center;min-width:0;padding:4px 18px;border:0;background:#fff;text-align:center}
+.cq-focus-banner-copy::after{position:absolute;top:0;right:0;width:1px;height:100%;background:linear-gradient(180deg,#727b7099 0 7px,transparent 7px calc(100% - 7px),#727b7099 calc(100% - 7px) 100%);content:""}
+.cq-focus-banner-copy strong,.cq-focus-banner-copy span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cq-focus-banner-copy strong{max-width:100%;font-size:18px;font-weight:650;line-height:1.25}
+.cq-focus-banner-meta{display:flex!important;align-items:center;justify-content:center;gap:13px;max-width:100%;color:var(--cq-muted);font-size:14px;line-height:1.3}
+.cq-focus-banner-meta>span{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:46%}
+.cq-focus-banner-meta svg{flex:0 0 auto}
+@media(max-width:700px){.cq-focus-banner{top:8px;left:calc(50% + 49px);width:min(var(--cq-focus-zone-width),calc(100% - 134px));height:47px}.cq-focus-banner.is-scrolling{width:calc(100% - 134px)}.cq-focus-banner-copy{padding-inline:12px}.cq-focus-banner-copy strong{font-size:16px}.cq-focus-banner-meta{font-size:12px}}
