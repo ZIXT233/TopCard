@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { markQueueCardWorking, mergeQueueSnapshot, queueFallbackPollMs, queuePollIntervalMs } from "@/lib/card-queue-snapshot";
+import { markQueueCardWorking, mergeQueueSnapshot, QUEUE_SSE_REFRESH_MS, queueFallbackPollMs, queuePollIntervalMs } from "@/lib/card-queue-snapshot";
 import type { CardQueue } from "@/lib/card-queue";
 import type { SessionInfo } from "@/lib/types";
 
@@ -57,7 +57,7 @@ export function useCardQueue() {
         if (!response.ok) throw new Error(data.error || "无法连接 Pi");
         accept(data);
         bootstrapped.current = true;
-        if (mounted.current) setError((current) => current ? "" : current);
+        if (mounted.current) setError("");
       } catch (error) {
         if (!controller.signal.aborted && mounted.current && generation === localGeneration.current)
           setError(error instanceof Error && error.name === "TimeoutError" ? "读取卡片队列超时，请重试。" : error instanceof Error ? error.message : String(error));
@@ -113,8 +113,16 @@ export function useCardQueue() {
     let live = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const events = new EventSource("/api/card-queue/events");
+    let sseRefresh: ReturnType<typeof setTimeout> | undefined;
+    const scheduleLiveRefresh = () => {
+      if (disposed || sseRefresh) return;
+      sseRefresh = setTimeout(() => {
+        sseRefresh = undefined;
+        if (!disposed) void refresh();
+      }, QUEUE_SSE_REFRESH_MS);
+    };
     events.onopen = () => { live = true; };
-    events.onmessage = () => { if (!disposed) void refresh(); };
+    events.onmessage = () => { if (!disposed) scheduleLiveRefresh(); };
     events.onerror = () => { live = events.readyState !== EventSource.CLOSED; };
     const poll = async (owner: number) => {
       if (disposed) return;
@@ -136,6 +144,7 @@ export function useCardQueue() {
       disposed = true;
       mounted.current = false;
       lifetime.current += 1;
+      clearTimeout(sseRefresh);
       clearTimeout(timer);
       events.close();
       request.current?.controller.abort();

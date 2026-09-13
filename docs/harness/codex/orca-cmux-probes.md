@@ -42,7 +42,7 @@
 当前 `cli` 分支已接入原卡片布局、xterm.js / node-pty、hooks 和 OSC 探针。下述为实现边界。
 
 1. PTY 生命周期、agent 工作状态、探针健康分别记录。进程活着不等于 working；没有新事件不等于 done。
-2. 以已验证的原生 hooks 表达提交/工具/批准/完成，用标题信号补足实时 TUI 状态。来源、启动代次、provider session id、事件时间必须保留，旧进程迟到事件不能修改新进程卡片。
+2. 以已验证的原生 hooks 表达提交/工具/批准/完成，用标题信号补足实时 TUI 状态。Plan / `request_user_input` 没有 hook（Codex #19328），`Implement this plan?` 也不设 Action Required 标题（#36132）。会话级打开 `tui.notifications=plan-mode-prompt,approval-requested` 的 OSC 9，以及 Action Required 标题，作为 PermissionRequest 拉回队列。来源、启动代次、provider session id、事件时间必须保留，旧进程迟到事件不能修改新进程卡片。
 3. 保持原生终端输入和批准；探针只报告，不返回批准决定。
 4. 检查 hook 实际握手，不只检查安装/版本。失效时保留可操作卡片并显示未知或探针异常，不能假装完成。
 5. 复用优先考虑 Orca 的 MIT 模块和边界测试，记录上游 commit/许可；cmux 参考入口、配置合并和测试办法，暂不直接复制代码。

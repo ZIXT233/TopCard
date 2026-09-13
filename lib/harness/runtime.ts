@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { createTerminal, getTerminalSnapshot } from "../terminal-manager";
 import { getHarnessAdapter } from "./registry";
+import { claudeHarnessEnv, readClaudeHarnessAuth } from "./claude-auth";
 import { connectionArgs } from "../ssh-connection";
 import { shellQuote, sshLoginExec, sshLoginCommand } from "../ssh-workspace";
 import type { QueueWorkspace } from "../card-queue";
@@ -77,6 +78,9 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
     }
     hooks = await prepareHookLaunch(adapter.id, signalDirectory, workspace, terminalId);
     hooks.env = { ...launchEnvironment, ...hooks.env };
+    if (adapter.id === "claude") {
+      hooks.env = { ...hooks.env, ...claudeHarnessEnv(await readClaudeHarnessAuth()) };
+    }
     if (resume?.providerSessionId) hooks.env.TOPCARD_HARNESS_SESSION_ID = resume.providerSessionId;
     const launchArgs = [...commandPrefix, ...(resume ? adapter.resumeArgs(resume.providerSessionId!) : []), ...adapter.args, ...hooks.args];
     const command = [adapter.executable, ...launchArgs].map(shellQuote).join(" ");
@@ -117,17 +121,23 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
         if (adapter.id === "shell" && shellCommandNotifications) observeShell(data);
         observeRemote(data);
         const state = probe.push(data);
-        if (!state) return;
+        const needsInput = probe.consumeNeedsInput?.() === true;
+        if (!state && !needsInput) return;
         const current = states.get(terminalId)!;
-        const titleIsFallback = adapter.id !== "codex" || !current.hookSeen;
+        const raised = needsInput
+          ? observeHook(current, { event: "PermissionRequest", at: Date.now(), sessionId: current.sessionId })
+          : current;
+        const titleIsFallback = adapter.id !== "codex" || !raised.hookSeen;
         states.set(terminalId, {
-          ...observeTitle(current, state, Date.now(), adapter.id === "codex"),
+          ...observeTitle(raised, state ?? raised.state, Date.now(), adapter.id === "codex"),
           ...(titleIsFallback ? {
-            sessionId: probe.sessionId ?? current.sessionId,
+            sessionId: probe.sessionId ?? raised.sessionId,
             sessionIdPrefix: probe.sessionIdPrefix,
             ...((probe.sessionId || probe.sessionIdPrefix) ? { identityAt: Date.now() } : {}),
           } : {}),
         });
+        const next = states.get(terminalId)!;
+        if (next.state !== current.state || next.hookSeen !== current.hookSeen) notifyQueueChanged("hook");
       },
     });
   } catch (error) { states.delete(terminalId); throw error; }

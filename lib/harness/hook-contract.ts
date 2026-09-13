@@ -45,9 +45,34 @@ export const HOOK_EVENT_ALIASES: Record<string, CanonicalHookEvent> = {
   sessionEnd: "Stop",
   AfterAgent: "Stop",
   afterAgentResponse: "Stop",
+  preToolUse: "UserPromptSubmit",
+  postToolUse: "UserPromptSubmit",
+  postToolUseFailure: "UserPromptSubmit",
+  beforeShellExecution: "PermissionRequest",
+  beforeMCPExecution: "PermissionRequest",
   PermissionRequest: "PermissionRequest",
   SessionInfo: "SessionInfo",
 };
+
+/** Cursor TUI user/project hooks. Permission events return ask, never allow. */
+export const CURSOR_HOOK_EVENTS = [
+  "sessionStart",
+  "beforeSubmitPrompt",
+  "preToolUse",
+  "postToolUse",
+  "postToolUseFailure",
+  "beforeShellExecution",
+  "beforeMCPExecution",
+  "afterAgentResponse",
+  "stop",
+  "sessionEnd",
+] as const;
+
+export function cursorHookStdout(event?: string): string {
+  if (event === "beforeSubmitPrompt") return '{"continue":true}';
+  if (event === "beforeShellExecution" || event === "beforeMCPExecution") return '{"permission":"ask"}';
+  return "{}";
+}
 
 export interface HookSignal {
   kind?: string;

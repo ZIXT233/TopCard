@@ -8,6 +8,7 @@ import { shellQuote, sshExec, sshLoginExec } from "../ssh-workspace";
 import type { QueueWorkspace } from "../card-queue";
 import type { HarnessId } from "./types";
 import { embeddedNodeExecutable } from "../node-runtime";
+import { CURSOR_HOOK_EVENTS, cursorHookStdout } from "./hook-contract";
 
 // Session-local plugins preserve user/project settings. Cursor also merges
 // ~/.cursor/hooks.json so its TUI will dispatch prompt/stop/response hooks.
@@ -27,6 +28,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     // changing the helper produces a new path and requires a fresh review.
     root = kind === "grok" ? `${home}/.cache/topcard/harness-plugins/grok`
       : kind === "codex" ? `${home}/.cache/topcard/harness-plugins/codex/${createHash("sha256").update(source).digest("hex").slice(0, 16)}`
+      : kind === "cursor" ? `${home}/.cache/topcard/harness-plugins/cursor`
       : `${home}/.cache/topcard/harness/${token}`;
     if (kind === "cursor") cursorConfigPath = `${home}/.cursor/hooks.json`;
     node = (await sshLoginExec(workspace.sshHost!, "command -v node")).toString().trim();
@@ -101,7 +103,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     const cursor = kind === "cursor";
     files[`${cursor ? ".cursor-plugin" : ".claude-plugin"}/plugin.json`] = JSON.stringify({ name: "topcard-session-state", version: "1.0.0", description: "Report this TopCard terminal's lifecycle" });
     const events = cursor
-      ? ["sessionStart", "beforeSubmitPrompt", "postToolUse", "postToolUseFailure", "afterAgentResponse", "stop", "sessionEnd"]
+      ? [...CURSOR_HOOK_EVENTS]
       : ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure"];
     const hooks = Object.fromEntries(events.map(event => [event, cursor
       ? [{ command: commandFor(event), timeout: hookTimeout }]
@@ -111,25 +113,10 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     files["hooks/hooks.json"] = JSON.stringify({ ...(cursor ? { version: 1, hooks: {} } : { hooks }) });
     if (cursor) {
       files["cursor-user-hooks.json"] = JSON.stringify({ version: 1, hooks });
-      if (workspace.kind === "local") {
-        cursorConfigPath = cursorUserHooksPath();
-        // Shared ~/.cursor/hooks.json routes by conversation id. Keep a pending
-        // queue so only sessionStart claims a new card; IDE traffic cannot steal it.
-        let active: { kind?: string; directory?: string; pending?: string[]; sessions?: Record<string, string> } = { kind: "cursor" };
-        try {
-          const existing = JSON.parse(await readFile(join(root, "active.json"), "utf8"));
-          if (existing && typeof existing === "object" && !Array.isArray(existing)) active = existing;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-        const sessions = active.sessions && typeof active.sessions === "object" && !Array.isArray(active.sessions)
-          ? { ...active.sessions } : {};
-        const pending = Array.isArray(active.pending)
-          ? active.pending.filter((value): value is string => typeof value === "string" && value.length > 0 && value !== directory)
-          : [];
-        pending.push(directory);
-        files["active.json"] = JSON.stringify({ kind: "cursor", directory, pending, sessions });
-      }
+      if (workspace.kind === "local") cursorConfigPath = cursorUserHooksPath();
+      const cardDirectory = workspace.kind === "ssh" ? `${root}/cards/${token}` : directory;
+      const existing = await readCursorActive(workspace, root);
+      files["active.json"] = JSON.stringify(mergeCursorActive(existing, cardDirectory, workspace.kind === "ssh" ? token : undefined));
     }
     args.push("--plugin-dir", root);
   }
@@ -203,6 +190,40 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
   return { args, env: { ...extraEnv, TOPCARD_HARNESS_SIGNAL_DIR: directory, TOPCARD_HARNESS_KIND: kind } };
 }
 
+type CursorActive = {
+  kind?: string;
+  directory?: string;
+  pending?: string[];
+  sessions?: Record<string, string>;
+  channels?: Record<string, string>;
+};
+
+async function readCursorActive(workspace: QueueWorkspace, root: string): Promise<CursorActive> {
+  try {
+    const raw = workspace.kind === "ssh"
+      ? (await sshExec(workspace.sshHost!, `if [ -f ${shellQuote(`${root}/active.json`)} ]; then cat ${shellQuote(`${root}/active.json`)}; fi`)).toString()
+      : await readFile(join(root, "active.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as CursorActive;
+  } catch (error) {
+    if (workspace.kind === "local" && (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  return { kind: "cursor" };
+}
+
+export function mergeCursorActive(existing: CursorActive, directory: string, channel?: string): CursorActive {
+  const sessions = existing.sessions && typeof existing.sessions === "object" && !Array.isArray(existing.sessions)
+    ? { ...existing.sessions } : {};
+  const pending = Array.isArray(existing.pending)
+    ? existing.pending.filter((value): value is string => typeof value === "string" && value.length > 0 && value !== directory)
+    : [];
+  pending.push(directory);
+  const channels = existing.channels && typeof existing.channels === "object" && !Array.isArray(existing.channels)
+    ? { ...existing.channels } : {};
+  if (channel) channels[directory] = channel;
+  return { kind: "cursor", directory, pending, sessions, ...(Object.keys(channels).length ? { channels } : {}) };
+}
+
 export function cursorUserHooksPath(home = homedir()): string {
   return process.env.TOPCARD_CURSOR_HOOKS || join(home, ".cursor", "hooks.json");
 }
@@ -235,9 +256,7 @@ export function mergeCursorUserHooks(existing: unknown, incoming: { hooks?: Reco
 export function windowsHookCommand(node: string, hook: string, electronNode: boolean, event?: string, extraEnv: Record<string, string> = {}): string {
   const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
   const invoke = [node, hook, ...(event ? [event] : [])].map(literal).join(" ");
-  const cursorReply = extraEnv.TOPCARD_HARNESS_KIND === "cursor"
-    ? (event === "beforeSubmitPrompt" ? '{"continue":true}' : "{}")
-    : undefined;
+  const cursorReply = extraEnv.TOPCARD_HARNESS_KIND === "cursor" ? cursorHookStdout(event) : undefined;
   // This outer command works in cmd, PowerShell and Git Bash. Keep all paths
   // and optional event arguments inside the encoded script, not shell syntax.
   // Read piped JSON explicitly; native stdin is not forwarded by PowerShell.

@@ -120,6 +120,13 @@ test("fresh submissions leave immediately and can return after rejection", () =>
   assert.match(submitted, /setInspecting\(cardId\)/);
 });
 
+test("host and history labels keep the CLI kind, not the session title", () => {
+  assert.match(source, /\$\{host\} · \$\{harnessName\(card\.harness\.kind\)\}/);
+  assert.match(source, /harnessName\(active\.harness\.kind\)/);
+  assert.match(source, /harnessName\(card\.harness!\.kind\)\} · \{titleOf\(card\)\}/);
+  assert.doesNotMatch(source, /harness\.title \|\| harnessName/);
+});
+
 test("keeps session tool inspection beside the card title and loads it on demand", () => {
   assert.match(source, /className="cq-title-branches" \/><div className="cq-title-tools"/);
   assert.match(source, /createPortal\([\s\S]*?className="cq-tools-trigger"/);

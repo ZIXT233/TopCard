@@ -22,6 +22,8 @@ export interface HarnessSession {
 export interface HarnessProbe {
   readonly sessionId?: string;
   readonly sessionIdPrefix?: string;
+  /** Codex plan/approval TUI prompts have no hook; consume one-shot input waits. */
+  consumeNeedsInput?(): boolean;
   push(data: string): HarnessState | undefined;
 }
 export interface HarnessAdapter {

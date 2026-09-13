@@ -17,7 +17,7 @@ import {
   useChatAppearance,
 } from "@/hooks/useChatAppearance";
 import { sendAgentCommand } from "@/lib/agent-client";
-import type { ShellToolSettingsResponse } from "@/lib/api-types";
+import type { ClaudeHarnessAuthResponse, ShellToolSettingsResponse } from "@/lib/api-types";
 import {
   setLastSettingsSection,
   type SettingsSection,
@@ -85,6 +85,12 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const [shellSettings, setShellSettings] = useState<ShellToolSettingsResponse | null>(null);
   const [shellSaving, setShellSaving] = useState(false);
   const [shellError, setShellError] = useState<string | null>(null);
+  const [claudeAuth, setClaudeAuth] = useState<ClaudeHarnessAuthResponse | null>(null);
+  const [claudeApiKey, setClaudeApiKey] = useState("");
+  const [claudeBaseUrl, setClaudeBaseUrl] = useState("");
+  const [claudeSaving, setClaudeSaving] = useState(false);
+  const [claudeStatus, setClaudeStatus] = useState("");
+  const [claudeError, setClaudeError] = useState<string | null>(null);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [webAuthEnabled, setWebAuthEnabled] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -127,6 +133,68 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
       });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/harness/claude-auth")
+      .then(async (response) => {
+        const data = await response.json() as ClaudeHarnessAuthResponse & { error?: string };
+        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+        if (!cancelled) {
+          setClaudeAuth(data);
+          setClaudeBaseUrl(data.baseUrl);
+        }
+      })
+      .catch((cause) => {
+        if (!cancelled) setClaudeError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveClaudeAuth = async () => {
+    setClaudeSaving(true);
+    setClaudeError(null);
+    setClaudeStatus("");
+    try {
+      const response = await fetch("/api/harness/claude-auth", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(claudeApiKey.trim() ? { apiKey: claudeApiKey.trim() } : {}),
+          baseUrl: claudeBaseUrl.trim(),
+        }),
+      });
+      const data = await response.json() as ClaudeHarnessAuthResponse & { error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setClaudeAuth(data);
+      setClaudeBaseUrl(data.baseUrl);
+      setClaudeApiKey("");
+      setClaudeStatus(t("settings.claudeAuthSaved"));
+    } catch (cause) {
+      setClaudeError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setClaudeSaving(false);
+    }
+  };
+
+  const clearClaudeAuth = async () => {
+    setClaudeSaving(true);
+    setClaudeError(null);
+    setClaudeStatus("");
+    try {
+      const response = await fetch("/api/harness/claude-auth", { method: "DELETE" });
+      const data = await response.json() as ClaudeHarnessAuthResponse & { error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setClaudeAuth(data);
+      setClaudeBaseUrl("");
+      setClaudeApiKey("");
+      setClaudeStatus(t("settings.claudeAuthCleared"));
+    } catch (cause) {
+      setClaudeError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setClaudeSaving(false);
+    }
+  };
 
   const togglePowerShell = async (enabled: boolean) => {
     setShellSaving(true);
@@ -300,6 +368,48 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
           {shellError && <p role="alert" className="settings-general-error">{shellError}</p>}
         </section>
       )}
+
+      <section className="settings-general-section">
+        <h3 className="settings-general-heading">{t("settings.claudeCode")}</h3>
+        <p className="settings-general-description">{t("settings.claudeCodeDescription")}</p>
+        <p className="settings-general-description">
+          {claudeAuth?.hasKey ? t("settings.claudeApiKeyConfigured") : t("settings.claudeApiKeyMissing")}
+        </p>
+        <div className="settings-claude-fields">
+          <label className="settings-claude-field">
+            <span>{t("settings.claudeApiKey")}</span>
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={claudeApiKey}
+              placeholder={t("settings.claudeApiKeyPlaceholder")}
+              onChange={(event) => setClaudeApiKey(event.target.value)}
+            />
+          </label>
+          <label className="settings-claude-field">
+            <span>{t("settings.claudeBaseUrl")}</span>
+            <input
+              type="url"
+              autoComplete="off"
+              spellCheck={false}
+              value={claudeBaseUrl}
+              placeholder={t("settings.claudeBaseUrlPlaceholder")}
+              onChange={(event) => setClaudeBaseUrl(event.target.value)}
+            />
+          </label>
+          <div className="settings-claude-actions">
+            <ConfigButton variant="primary" disabled={claudeSaving} onClick={() => void saveClaudeAuth()}>
+              {t("settings.claudeAuthSave")}
+            </ConfigButton>
+            <ConfigButton variant="secondary" disabled={claudeSaving || !(claudeAuth?.hasKey || claudeAuth?.baseUrl)} onClick={() => void clearClaudeAuth()}>
+              {t("settings.claudeAuthClear")}
+            </ConfigButton>
+          </div>
+        </div>
+        {claudeStatus && <p role="status" className="settings-general-description">{claudeStatus}</p>}
+        {claudeError && <p role="alert" className="settings-general-error">{claudeError}</p>}
+      </section>
 
       <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("common.language")}</h3>

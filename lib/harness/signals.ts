@@ -1,5 +1,5 @@
 import type { HarnessState } from "./types.ts";
-import { normalizeHookSignal, type HookSignal } from "./hook-contract.ts";
+import { CURSOR_HOOK_EVENTS, normalizeHookSignal, type HookSignal } from "./hook-contract.ts";
 export type { HookSignal } from "./hook-contract.ts";
 
 export interface ProbeState {
@@ -25,17 +25,20 @@ export interface ProbeState {
 export function hookState(event: HookSignal): HarnessState | undefined {
   const signal = normalizeHookSignal(event);
   if (signal.agentId) return undefined;
-  if (event.event === "Notification" && ["permission_prompt", "ToolPermission"].includes(event.notification ?? "")) return "attention";
-  if (event.event === "Notification" && event.notification === "idle_prompt") return "attention";
+  const notification = signal.notification ?? event.notification;
+  if ((signal.event === "Notification" || event.event === "Notification") && ["permission_prompt", "ToolPermission", "idle_prompt"].includes(notification ?? "")) {
+    return "attention";
+  }
   if (signal.event === "PermissionRequest") return "attention";
-  if (["PreToolUse", "BeforeTool"].includes(event.event) && /(^|[/.])(request_user_input|ask_user_question|AskUserQuestion)$/.test(event.tool ?? "")) return "attention";
+  const asking = /(^|[/.])(request_user_input|ask_user_question|AskUserQuestion)$/.test(signal.tool ?? event.tool ?? "");
+  if (asking && ["PreToolUse", "BeforeTool", "preToolUse"].includes(event.event)) return "attention";
   if (signal.event === "UserPromptSubmit") return "working";
   if (signal.event === "Stop") return "attention";
   return undefined;
 }
 
 const identityStartEvents = new Set(["SessionStart", "sessionStart", "PreInvocation"]);
-const cursorEvents = new Set(["sessionStart", "beforeSubmitPrompt", "postToolUse", "postToolUseFailure", "afterAgentResponse", "stop", "sessionEnd"]);
+const cursorEvents = new Set<string>(CURSOR_HOOK_EVENTS);
 
 export function observeHook(current: ProbeState, raw: HookSignal): ProbeState {
   const signal = normalizeHookSignal(raw);

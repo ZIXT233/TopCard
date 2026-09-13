@@ -6,6 +6,9 @@ export function reuseIfEqual<T>(current: T, next: T): T {
   return current !== undefined && JSON.stringify(current) === JSON.stringify(next) ? current : next;
 }
 
+/** Coalesce bursty SSE hook notifications before a full /api/card-queue reconcile. */
+export const QUEUE_SSE_REFRESH_MS = 200;
+
 export const QUEUE_LIVE_POLL_MS = 8_000;
 export const QUEUE_HIDDEN_POLL_MS = 20_000;
 export const QUEUE_OFFLINE_POLL_MS = 1_200;
