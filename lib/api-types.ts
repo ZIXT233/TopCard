@@ -14,6 +14,11 @@ export interface ShellToolSettingsResponse {
   powerShellEnabled: boolean;
 }
 
+export interface ClaudeHarnessAuthResponse {
+  hasKey: boolean;
+  baseUrl: string;
+}
+
 export interface SkillSearchResult {
   package: string;
   installs: string;

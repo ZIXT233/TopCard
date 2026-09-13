@@ -4,7 +4,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const explicitEvent = process.argv[2];
-const cursorEvents = new Set(['sessionStart', 'beforeSubmitPrompt', 'postToolUse', 'postToolUseFailure', 'afterAgentResponse', 'stop', 'sessionEnd']);
+const cursorEvents = new Set(['sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse', 'stop', 'sessionEnd']);
+function cursorReply(event) {
+  if (event === 'beforeSubmitPrompt') return { continue: true };
+  if (event === 'beforeShellExecution' || event === 'beforeMCPExecution') return { permission: 'ask' };
+  return {};
+}
 const kind = process.env.TOPCARD_HARNESS_KIND || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
 const token = process.env.TOPCARD_HARNESS_CHANNEL;
 const envDirectory = process.env.TOPCARD_HARNESS_SIGNAL_DIR;
@@ -17,20 +22,27 @@ if (kind !== 'cursor' && !envDirectory && !token && !legacyActiveDirectory()) {
   process.exit(0);
 }
 if (kind === 'cursor' && !envDirectory && !token && !hasCursorRouting()) {
-  process.stdout.write(JSON.stringify(explicitEvent === 'beforeSubmitPrompt' ? { continue: true } : {}) + '\n');
+  process.stdout.write(JSON.stringify(cursorReply(explicitEvent)) + '\n');
   process.exit(0);
 }
 const at = Date.now();
-const timer = setTimeout(() => { consume(); process.exit(0); }, 8000);
-let input = '', oversized = false, done = false;
+let input = '', oversized = false, done = false, finished = false;
+const timer = setTimeout(() => { consume(); finish(); }, 8000);
+function finish() {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timer);
+  if (kind === 'cursor') process.stdout.write(JSON.stringify(cursorReply(explicitEvent)) + '\n');
+  process.exit(0);
+}
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
-  if (input.length + chunk.length > 1024 * 1024) { oversized = true; input = ''; }
-  if (!oversized) input += chunk;
+  if (input.length + chunk.length > 1024 * 1024) { oversized = true; input = ''; finish(); return; }
+  input += chunk;
   consume();
 });
-process.stdin.on('error', () => process.exit(0));
-process.stdin.on('end', () => consume());
+process.stdin.on('error', () => finish());
+process.stdin.on('end', () => { consume(); finish(); });
 
 function readActive() {
   try { return JSON.parse(fs.readFileSync(activePath, 'utf8')); }
@@ -65,7 +77,9 @@ function registerCursorSession(sessionId, directory) {
     sessions[sessionId] = directory;
     const pending = Array.isArray(active.pending)
       ? active.pending.filter(value => value !== directory) : [];
-    writeActive({ ...active, kind: 'cursor', directory, sessions, pending });
+    const channels = active.channels && typeof active.channels === 'object' && !Array.isArray(active.channels)
+      ? { ...active.channels } : {};
+    writeActive({ ...active, kind: 'cursor', directory, sessions, pending, channels });
   } catch { /* Routing is best-effort; the signal file still lands. */ }
 }
 
@@ -152,8 +166,9 @@ function consume() {
         } finally { fs.closeSync(fd); }
       } catch {}
     }
-    if (token) {
-      const signal = Buffer.from(JSON.stringify({ token, signal: event })).toString('base64');
+    const channel = token || (directory && (readActive()?.channels?.[directory]));
+    if (channel) {
+      const signal = Buffer.from(JSON.stringify({ token: channel, signal: event })).toString('base64');
       fs.writeFileSync(process.env.TOPCARD_HARNESS_TTY || '/dev/tty', `\x1b]777;topcard;${signal}\x07`);
     } else if (directory) {
       const target = path.join(directory, `${at}-${randomUUID()}.json`);
@@ -162,8 +177,6 @@ function consume() {
     }
   } catch { /* Observation cannot block the CLI or emit model-visible text. */ }
   finally {
-    if (kind === 'cursor') process.stdout.write(JSON.stringify(explicitEvent === 'beforeSubmitPrompt' ? { continue: true } : {}) + '\n');
-    clearTimeout(timer);
-    process.exit(0);
+    finish();
   }
 }

@@ -27,7 +27,7 @@ Pi CLI 使用 Pi 原生 extension 事件，完成边界为 agent_settled。TopCa
 
 ## 当前边界
 
-- Cursor 未接独立权限等待事件，等待批准可能仍显示工作中。
+- Cursor 订阅 beforeShellExecution / beforeMCPExecution，回 `{"permission":"ask"}` 进入 attention；不回 allow。preToolUse 只观察，不代批。SSH 与本机共用 harness-plugins/cursor + active.json（channels 映射 OSC token）。hook 异常退出也必须回 JSON。
 - Shell 后台通知支持 Bash、zsh、Windows PowerShell；Bash 使用 TopCard 精简探针，不继续同步 Orca 的完整 Bash 兼容实现；远端 Shell 探针不依赖 Node，其他远端适配依赖 Node。
 - Grok 的 TopCard 专用 hooks 文件仅在选择并检测到 Grok 后安装；没有 TopCard 信号环境时不回传。
 - Gemini 上层配置／组织策略仍优先；OpenCode 保留已有运行时配置并追加插件。
