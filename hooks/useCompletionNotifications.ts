@@ -77,7 +77,12 @@ export function useCompletionNotifications(queue: CardQueue | null) {
       window.dispatchEvent(new Event(CHANGE_EVENT));
       if (!next) { announceStatus(""); return; }
       announceStatus(t("settings.notificationChecking"));
-      void desktop.requestNotifications().then((desktopState) => {
+      void desktop.requestNotifications().then(async (desktopState) => {
+        // Keep the renderer Notification API in sync with the native probe so
+        // completion toasts are not dropped while permission still looks denied.
+        if ("Notification" in window && Notification.permission === "default") {
+          try { await requestPermissionOnce(); } catch { /* Native probe already ran. */ }
+        }
         if (desktopState === "granted" || desktopState === "requested") {
           announceStatus(t("settings.notificationEnabled"));
           statusClearTimer = window.setTimeout(() => announceStatus(""), 3000);
@@ -146,7 +151,11 @@ export function useCompletionNotifications(queue: CardQueue | null) {
           body,
           sessionUrl: url,
           tag: `topcard:${card.id}`,
-          onClick: () => { window.focus(); window.location.assign(url); },
+          onClick: () => {
+            window.focus();
+            // Soft-focus the card; location.assign would reload the whole queue.
+            window.dispatchEvent(new CustomEvent("topcard:notification-click", { detail: { url } }));
+          },
         });
         if (result) { try { persistentStorage().setItem(key, turn); } catch { /* Notification already delivered. */ } }
       };

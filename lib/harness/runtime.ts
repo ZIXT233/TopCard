@@ -1,4 +1,6 @@
 import { localEnvironment, resolveLocalCommand } from "./local-environment";
+import { windowsCommand } from "./windows-command";
+import { bundledPiCommand } from "./bundled-pi";
 import { prepareShell } from "./shell-launch";
 import { createShellProbe } from "./shell-probe";
 import { prepareHookLaunch } from "./hook-launch";
@@ -9,6 +11,8 @@ import { codexSessionTitle, resolveCodexSessionPrefix, codexSessionExists } from
 import { readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { observeHook, observeTitle, type ProbeState, type HookSignal } from "./signals";
+import { normalizeHookSignal } from "./hook-contract";
+import { notifyQueueChanged } from "../card-queue-live";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -28,7 +32,7 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
   const terminalId = randomUUID().replaceAll("-", "");
   const signalDirectory = signalDir(terminalId);
   if (resume && !resume.providerSessionId) throw new Error("未捕获到原会话 ID，无法续接。请通过新会话入口创建新卡片。");
-  let executable: string, args: string[], version: string;
+  let executable: string, args: string[] | string, version: string;
   let shellCommandNotifications = false;
   let hooks: { args: string[]; env: Record<string, string> } = { args: [], env: {} };
   if (adapter.id === "shell") {
@@ -38,10 +42,17 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
     shellCommandNotifications = shell.commandNotifications;
   } else {
     let commandPath = adapter.executable;
+    let commandPrefix: string[] = [];
     if (workspace.kind === "local") {
       let env = await localEnvironment();
       let resolved = await resolveLocalCommand(adapter.executable, env);
       if (!resolved) { env = await localEnvironment(true); resolved = await resolveLocalCommand(adapter.executable, env); }
+      if (!resolved && adapter.id === "pi") {
+        const bundled = await bundledPiCommand(env);
+        resolved = bundled.executable;
+        commandPrefix = bundled.args;
+        env = bundled.env;
+      }
       if (!resolved) throw new Error(`找不到 ${adapter.executable}：已读取用户 Shell 环境并检查常见安装目录`);
       commandPath = resolved;
       hooks.env = env as Record<string, string>;
@@ -50,8 +61,11 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
     const versionCommand = `${adapter.executable} ${adapter.id === "grok" ? "version" : "--version"}`;
     try {
       if (workspace.kind === "ssh") version = (await sshLoginExec(workspace.sshHost!, versionCommand)).toString().trim();
-      else if (process.platform === "win32") version = (await exec(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `${windowsArgument(commandPath)} ${adapter.id === "grok" ? "version" : "--version"}`], { cwd: workspace.cwd, timeout: 10000, env: { ...process.env, ...launchEnvironment } })).stdout.trim();
-      else version = (await exec(commandPath, [adapter.id === "grok" ? "version" : "--version"], { cwd: workspace.cwd, timeout: 10000, env: { ...process.env, ...launchEnvironment } })).stdout.trim();
+      else if (process.platform === "win32") {
+        const command = windowsCommand(commandPath, [...commandPrefix, adapter.id === "grok" ? "version" : "--version"]);
+        version = (await exec(command.executable, command.args, { cwd: workspace.cwd, timeout: 10000, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments, env: { ...process.env, ...launchEnvironment } })).stdout.trim();
+      }
+      else version = (await exec(commandPath, [...commandPrefix, adapter.id === "grok" ? "version" : "--version"], { cwd: workspace.cwd, timeout: 10000, env: { ...process.env, ...launchEnvironment } })).stdout.trim();
     } catch (error) {
       throw new Error(`${adapter.executable} 启动检测失败：${error instanceof Error ? error.message : String(error)}`);
     }
@@ -64,15 +78,17 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
     hooks = await prepareHookLaunch(adapter.id, signalDirectory, workspace, terminalId);
     hooks.env = { ...launchEnvironment, ...hooks.env };
     if (resume?.providerSessionId) hooks.env.TOPCARD_HARNESS_SESSION_ID = resume.providerSessionId;
-    const launchArgs = [...(resume ? adapter.resumeArgs(resume.providerSessionId!) : []), ...adapter.args, ...hooks.args];
+    const launchArgs = [...commandPrefix, ...(resume ? adapter.resumeArgs(resume.providerSessionId!) : []), ...adapter.args, ...hooks.args];
     const command = [adapter.executable, ...launchArgs].map(shellQuote).join(" ");
     if (workspace.kind === "ssh") {
       executable = "ssh";
       const exports = Object.entries(hooks.env).map(([key, value]) => `${key}=${shellQuote(value)}`).join(" ");
       args = [...await connectionArgs(workspace.sshHost!, { requestTty: true }), sshLoginCommand(`cd ${shellQuote(workspace.cwd)} && ${exports ? `export ${exports} && ` : ""}TOPCARD_HARNESS_TTY=$(tty) && export TOPCARD_HARNESS_TTY && exec ${command}`)];
     } else if (process.platform === "win32") {
-      executable = process.env.ComSpec || "cmd.exe";
-      args = ["/d", "/s", "/c", [commandPath, ...launchArgs].map(windowsArgument).join(" ")];
+      const launch = windowsCommand(commandPath, launchArgs);
+      executable = launch.executable;
+      // node-pty accepts a verbatim Windows command line as a string.
+      args = launch.windowsVerbatimArguments ? launch.args.join(" ") : launch.args;
     } else {
       executable = commandPath;
       args = launchArgs;
@@ -82,7 +98,10 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
   states.set(terminalId, { state: adapter.id === "shell" ? "attention" : "starting", at: Date.now(), sessionId: resume?.providerSessionId, title: resume?.title });
   const observeRemote = createHookOscProbe(terminalId, signal => {
     const current = states.get(terminalId);
-    if (current && adapter.id !== "shell") states.set(terminalId, observeHook(current, signal));
+    if (!current || adapter.id === "shell") return;
+    const next = observeHook(current, normalizeHookSignal(signal));
+    states.set(terminalId, next);
+    if (next.state !== current.state || next.hookSeen !== current.hookSeen) notifyQueueChanged("hook");
   });
   const observeShell = createShellProbe((running, exitCode) => {
     const current = states.get(terminalId)!;
@@ -90,6 +109,7 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
     states.set(terminalId, { ...current, shellCommandRunning: running,
       shellCommandStartedAt: running ? Date.now() : current.shellCommandStartedAt,
       shellExitCode: running ? undefined : exitCode });
+    notifyQueueChanged("shell");
   });
   try {
     createTerminal(workspace.runtimeCwd, 100, 30, terminalId, { executable, args, persistent: true, env: hooks.env,
@@ -114,9 +134,6 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
   return { kind: adapter.id, shellCommandNotifications, terminalId, state: adapter.id === "shell" ? "attention" : "starting", version, remote: workspace.kind === "ssh", providerSessionId: resume?.providerSessionId, title: resume?.title ?? (adapter.id === "shell" ? workspace.name : undefined) };
 }
 const signalDir = (id: string) => join(process.env.TOPCARD_DATA_DIR || join(process.cwd(), ".topcard"), "harness-signals", id);
-function windowsArgument(value: string): string {
-  return '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1') + '"';
-}
 export async function harnessSnapshot(session: HarnessSession): Promise<HarnessSession> {
   let current = states.get(session.terminalId);
   if (current) {
@@ -125,7 +142,7 @@ export async function harnessSnapshot(session: HarnessSession): Promise<HarnessS
       const files = (await readdir(directory)).filter(name => /^\d+-[a-f0-9-]+\.json$/.test(name)).sort().slice(0, 200);
       for (const file of files) {
         try {
-          const signal = JSON.parse(await readFile(join(directory, file), "utf8")) as HookSignal;
+          const signal = normalizeHookSignal(JSON.parse(await readFile(join(directory, file), "utf8")) as HookSignal);
           current = observeHook(states.get(session.terminalId) ?? current, signal);
           states.set(session.terminalId, current);
         } catch { /* Malformed probe input cannot interrupt the queue. */ }

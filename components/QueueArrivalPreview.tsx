@@ -7,6 +7,7 @@ export interface QueueArrivalNotice {
   key: string;
   cardId: string;
   side: QueueArrivalSide;
+  quiet?: boolean;
   title: string;
   reply: string;
 }

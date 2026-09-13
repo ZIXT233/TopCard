@@ -1,0 +1,12 @@
+.overlay {
+  position:absolute; inset:0; z-index:40; display:grid; place-items:center; overflow:auto;
+  background:color-mix(in srgb,var(--bg-panel) 65%,transparent);
+  backdrop-filter:blur(9px); -webkit-backdrop-filter:blur(9px);
+}
+.content { display:flex; flex-direction:column; align-items:center; gap:16px; padding:28px; max-width:460px; text-align:center; color:var(--text); }
+.mark { font-size:40px; font-weight:700; line-height:1; }
+.overlay h3 { margin:0; font-size:24px; font-weight:600; }
+.overlay p { margin:0 0 8px; font-size:15px; line-height:1.6; color:var(--text-muted); }
+.overlay button { border:0; background:transparent; color:var(--text-muted); min-height:44px; padding:12px 24px; border-radius:12px; cursor:pointer; }
+.overlay .primary { background:var(--text); color:var(--bg-panel); min-width:200px; font-size:16px; font-weight:600; }
+.overlay button:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }

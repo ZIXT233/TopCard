@@ -36,7 +36,18 @@ Workspaces can point to local or SSH directories. Remote CLI sessions run on the
 
 From the app, add a workspace, create a card, and choose a CLI harness or native Pi session. You can also bring existing Pi sessions into the queue. `Cmd/Ctrl + J` opens the creation dialog; `Cmd/Ctrl + ]` moves the current card to the back.
 
-To run from source, install **Node.js >= 22.19.0** and npm:
+### npm (browser)
+
+Requires **Node.js >= 22.19.0**:
+
+```bash
+npm install -g topcard
+topcard
+```
+
+Open [http://127.0.0.1:30141](http://127.0.0.1:30141). This is the second distribution channel alongside the Electron installer; it does not include the desktop tray or detached card windows.
+
+### From source
 
 ```bash
 npm ci
@@ -74,7 +85,7 @@ Installers are written to `build/releases/`.
 
 Build on the target operating system and architecture: native dependencies such as `node-pty` make cross-platform builds unsupported by the current workflow. macOS packages currently use ad-hoc signing and are not notarized.
 
-The desktop build runs in a temporary directory and leaves your development `.next` untouched, so it can run alongside `npm run dev`. It needs extra disk space for a temporary dependency copy; the first build may download fonts, Electron, or packaging tools.
+The desktop build writes `.next-desktop` and leaves the development `.next` untouched, so it can run alongside `npm run dev`. Unchanged inputs reuse `build/desktop-runtime`; the first or forced build still runs a full Next production compile. NSIS installer compression is not skipped by this cache.
 
 To build and launch the production desktop without creating an installer:
 
@@ -83,19 +94,20 @@ npm run desktop:build
 npm run desktop:start
 ```
 
-The runtime is written to `build/desktop-runtime/`. It starts its own backend; rebuild after changing application code. See [desktop development notes](desktop/README.md) for implementation details.
+The runtime is written to `build/desktop-runtime/`. Unchanged inputs reuse that directory; application edits rebuild with the `.next-desktop` cache. See [desktop development notes](desktop/README.md) for implementation details.
 
-### Browser production build
+### Browser production build / npm package
 
 Use a separate checkout with no development server running:
 
 ```bash
 npm ci
 npm run build
-npm run start
+npm start
+# or: npx topcard
 ```
 
-Open [http://127.0.0.1:30141](http://127.0.0.1:30141). This build writes to the checkout's `.next`; do not run it alongside development in the same directory.
+Open [http://127.0.0.1:30141](http://127.0.0.1:30141). This build writes to the checkout's `.next`; do not run it alongside development in the same directory. `npm publish` runs a production build via `prepublishOnly` and ships `.next` inside the `topcard` package.
 
 ## Data and lifecycle
 

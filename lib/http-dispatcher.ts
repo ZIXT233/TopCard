@@ -57,6 +57,7 @@ function createUndiciOriginDispatcher(origin: string | URL, options: object): un
 
 export function configureHttpDispatcher(
   timeoutMs: number = DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+  systemProxy: { httpProxy?: string; httpsProxy?: string; noProxy?: string } = {},
 ): void {
   if (dispatcherGlobal.__piWebHttpDispatcherConfigured) return;
 
@@ -67,6 +68,9 @@ export function configureHttpDispatcher(
 
   const dispatcher = withUndiciErrorListener(
     new undici.EnvHttpProxyAgent({
+      httpProxy: process.env.http_proxy ?? process.env.HTTP_PROXY ?? systemProxy.httpProxy,
+      httpsProxy: process.env.https_proxy ?? process.env.HTTPS_PROXY ?? process.env.http_proxy ?? process.env.HTTP_PROXY ?? systemProxy.httpsProxy,
+      noProxy: process.env.no_proxy ?? process.env.NO_PROXY ?? systemProxy.noProxy,
       allowH2: false,
       bodyTimeout: normalizedTimeoutMs,
       headersTimeout: normalizedTimeoutMs,

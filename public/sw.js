@@ -106,30 +106,48 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(focusOrOpenWindow(targetUrl.href));
 });
 
+function isAppShell(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === self.location.origin
+      && (parsed.pathname === "/" || parsed.pathname === "/workspace");
+  } catch {
+    return false;
+  }
+}
+
 async function focusOrOpenWindow(targetUrl) {
   const windowClients = await self.clients.matchAll({
     type: "window",
     includeUncontrolled: true,
   });
-  const exactClient = windowClients.find((client) => client.url === targetUrl);
-  const candidates = exactClient
-    ? [exactClient, ...windowClients.filter((client) => client !== exactClient)]
-    : windowClients;
+  let target;
+  try { target = new URL(targetUrl); } catch { target = new URL("/", self.location.origin); }
+  const cardId = target.searchParams.get("card");
+  const shells = windowClients.filter((client) => isAppShell(client.url));
+  // Soft-focus an already-open shell instead of navigate() — query-only targets
+  // (attention/session/card) would otherwise force a full page reload.
+  const preferred = cardId
+    ? shells.find((client) => {
+      try { return new URL(client.url).searchParams.get("card") === cardId; } catch { return false; }
+    }) || shells.find((client) => {
+      try { return !new URL(client.url).searchParams.get("card"); } catch { return false; }
+    }) || shells[0]
+    : shells.find((client) => {
+      try { return !new URL(client.url).searchParams.get("card"); } catch { return false; }
+    }) || shells[0];
 
-  for (const client of candidates) {
+  if (preferred) {
     try {
-      const targetClient = client.url === targetUrl
-        ? client
-        : (await client.navigate(targetUrl)) ?? client;
-      if (client.url === targetUrl) client.postMessage({ type: "notification-click", url: targetUrl });
-      await targetClient.focus();
+      preferred.postMessage({ type: "notification-click", url: target.href });
+      await preferred.focus();
       return;
     } catch {
-      // The window may have closed between matchAll and focus; try the next one.
+      // Fall through to openWindow if the client vanished.
     }
   }
 
-  await self.clients.openWindow(targetUrl);
+  await self.clients.openWindow(target.href);
 }
 
 async function cacheFirst(request) {

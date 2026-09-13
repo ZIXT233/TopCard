@@ -14,9 +14,12 @@ module.exports = {
   extraMetadata: { main: 'desktop/main.cjs' },
   extraResources: [{ from: staging, to: 'runtime' }],
   beforePack: async () => {
+    const begin = Date.now();
+    console.log('[desktop-package] start beforePack copy runtime');
     try {
       await cp(runtime, staging, { recursive: true });
       await rename(join(staging, 'node_modules'), join(staging, 'modules'));
+      console.log(`[desktop-package] beforePack copy runtime: ${((Date.now() - begin) / 1000).toFixed(1)}s`);
     } catch (error) { await rm(staging, { recursive: true, force: true }); throw error; }
   },
   afterPack: async ({ appOutDir, electronPlatformName }) => {
@@ -26,9 +29,12 @@ module.exports = {
     // extraResources filters source directories named node_modules. Stage the
     // traced dependencies as "modules", then restore Node's standard layout in
     // the completed app so both CommonJS and ESM package resolution work.
+    const begin = Date.now();
+    console.log('[desktop-package] start afterPack restore node_modules');
     try {
       await rename(join(resources, 'runtime', 'modules'), join(resources, 'runtime', 'node_modules'));
-      execFileSync(process.execPath, [join(__dirname, 'verify-pi-runtime.mjs'), join(resources, 'runtime')], { stdio: 'inherit', timeout: 30000 });
+      execFileSync(process.execPath, [join(__dirname, 'verify-pi-runtime.mjs'), join(resources, 'runtime')], { stdio: 'inherit', timeout: 120000 });
+      console.log(`[desktop-package] afterPack restore+verify: ${((Date.now() - begin) / 1000).toFixed(1)}s`);
     } finally { await rm(staging, { recursive: true, force: true }); }
   },
   npmRebuild: false,

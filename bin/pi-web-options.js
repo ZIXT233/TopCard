@@ -29,21 +29,32 @@ function normalizePort(value) {
   return String(port);
 }
 
-function getHelpText() {
-  return `Usage: pi-web [options]
+function envFlag(env, ...keys) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(env, key) && env[key] != null && env[key] !== "") {
+      return env[key];
+    }
+  }
+  return undefined;
+}
 
-Start the Pi Web UI server.
+function getHelpText() {
+  return `Usage: topcard [options]
+
+Start the TopCard server in the browser.
 
 Options:
   -p, --port <port>          Server port (default: 30141, or PORT)
-  -H, --hostname <host>      Bind hostname (default: 127.0.0.1, or PI_WEB_HOSTNAME)
+  -H, --hostname <host>      Bind hostname (default: 127.0.0.1, or TOPCARD_HOSTNAME / PI_WEB_HOSTNAME)
       --no-open              Do not open a browser automatically
   -h, --help                 Show this help message and exit
 
 Environment:
   PORT                       Default port when --port is omitted
-  PI_WEB_HOSTNAME            Default hostname when --hostname is omitted
-  PI_WEB_NO_OPEN             Set to 1/true/yes/on to disable browser open
+  TOPCARD_HOSTNAME           Default hostname when --hostname is omitted
+  PI_WEB_HOSTNAME            Legacy alias for TOPCARD_HOSTNAME
+  TOPCARD_NO_OPEN            Set to 1/true/yes/on to disable browser open
+  PI_WEB_NO_OPEN             Legacy alias for TOPCARD_NO_OPEN
   PI_WEB_PASSWORD            Enable browser password login and API Basic Auth
   PI_WEB_ALLOWED_HOSTS       Extra exact proxy/custom hostnames, comma-separated
 `;
@@ -76,11 +87,12 @@ function parseLaunchOptions(args = process.argv.slice(2), env = process.env) {
     );
   }
 
+  const noOpenEnv = envFlag(env, "TOPCARD_NO_OPEN", "PI_WEB_NO_OPEN");
   return {
     help: false,
     port: normalizePort(values.port ?? env.PORT ?? "30141"),
-    hostname: values.hostname ?? env.PI_WEB_HOSTNAME ?? "127.0.0.1",
-    openBrowser: !values["no-open"] && !isEnabled(env.PI_WEB_NO_OPEN),
+    hostname: values.hostname ?? envFlag(env, "TOPCARD_HOSTNAME", "PI_WEB_HOSTNAME") ?? "127.0.0.1",
+    openBrowser: !values["no-open"] && !isEnabled(noOpenEnv),
   };
 }
 

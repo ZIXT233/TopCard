@@ -54,12 +54,13 @@ test("shows directional queue arrivals and keeps detached completion sounds", ()
   assert.match(queueCssSource, /cq-arrival-right 5s/);
 });
 
-test("orders theme, language, and sorting controls in the content toolbar", () => {
+test("orders theme, language, sorting, and attention-mode controls in the content toolbar", () => {
   const toolbarStart = source.indexOf('className="cq-content-toolbar"');
   const themeStart = source.indexOf('aria-label={t("settings.appearance")}', toolbarStart);
   const languageStart = source.indexOf('aria-label={t("common.language")}', toolbarStart);
-  const sortingStart = source.indexOf('className="cq-insertion-position"', toolbarStart);
-  assert.ok(toolbarStart >= 0 && toolbarStart < themeStart && themeStart < languageStart && languageStart < sortingStart);
+  const sortingStart = source.indexOf('aria-label={t("queue.切换队列排序")}', toolbarStart);
+  const modeStart = source.indexOf('aria-label={t("queue.切换工作模式")}', toolbarStart);
+  assert.ok(toolbarStart >= 0 && toolbarStart < themeStart && themeStart < languageStart && languageStart < sortingStart && sortingStart < modeStart);
   assert.match(source, /THEME_OPTIONS\.map\(\(option\)/);
   assert.match(source, /supportedLocales\.map\(\(plugin\)/);
   assert.match(source, /setLocale\(plugin\.id as typeof locale\)/);
@@ -68,6 +69,16 @@ test("orders theme, language, and sorting controls in the content toolbar", () =
   assert.match(languageIconSource, /<path d="m5 8 6 6" \/>/);
   assert.match(source, /t\("queue\.先进先出"\)/);
   assert.match(source, /className="cq-toolbar-popover cq-sort-popover"/);
+  assert.match(source, /className="cq-toolbar-popover cq-mode-popover"/);
+  assert.match(source, /ATTENTION_MODES\.map/);
+  assert.match(source, /chooseAttentionMode\(option\.id\)/);
+  assert.match(source, /shouldQuietRearQueueArrival\(attentionMode, side, document\.visibilityState\)/);
+  assert.match(source, /attentionMode=\{attentionMode\}/);
+  assert.match(source, /focusedId=\{focus\?\.id \?\? active\?\.id\}/);
+  assert.match(source, /cq-attention-mode/);
+  assert.match(source, /cq-queue-toast/);
+  assert.match(source, /queue\.已切换专注模式说明/);
+  assert.match(queueCssSource, /\.cq-content-toolbar \.cq-attention-mode/);
   assert.match(source, /chooseSortMode\("score"\)/);
   assert.match(source, /chooseSortMode\("fifo"\)/);
   assert.match(source, /aria-checked=\{queue\?\.sortMode === "score"\}/);
@@ -75,6 +86,7 @@ test("orders theme, language, and sorting controls in the content toolbar", () =
   assert.doesNotMatch(source, /mode:queue\?\.sortMode === "score" \? "fifo" : "score"/);
   assert.doesNotMatch(source, /cq-theme-toggle|cq-mobile-theme/);
   assert.match(queueCssSource, /\.cq-toolbar-menu:hover>\.cq-toolbar-popover,\.cq-toolbar-menu:focus-within>\.cq-toolbar-popover/);
+  assert.match(queueCssSource, /\.cq-mode-label/);
 });
 
 test("fresh accepted sessions leave the deck before durable attachment", () => {
@@ -192,5 +204,5 @@ test("reuses an already-open detached card tab without navigating it again", () 
 
 test("collapses the sort trigger to an icon when horizontal space is limited", async () => {
   const styles = await readFile(new URL("../app/card-queue.css", import.meta.url), "utf8");
-  assert.match(styles, /@media\(max-width:900px\)\{\.cq-content-toolbar \.cq-insertion-position\{[^}]*width:32px;[^}]*min-width:32px;[^}]*max-width:32px;[^}]*gap:0\}\.cq-sort-label\{display:none\}\}/);
+  assert.match(styles, /@media\(max-width:900px\)\{\.cq-content-toolbar \.cq-insertion-position\{[^}]*width:32px;[^}]*min-width:32px;[^}]*max-width:32px;[^}]*gap:0\}\.cq-sort-label,\.cq-mode-label\{display:none\}\}/);
 });

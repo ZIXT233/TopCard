@@ -1,0 +1,32 @@
+# Packed by npm; this file replaces .gitignore for publish contents.
+# Keep .next production output; exclude desktop/dev/test noise.
+
+node_modules/
+.next-desktop/
+.next/cache/
+.next/types/
+.next/dev/
+build/
+dist/
+coverage/
+test-results/
+.topcard/
+.card-queue/
+.factory/
+.vercel/
+.DS_Store
+*.pem
+.env*
+*.tsbuildinfo
+next-env.d.ts
+e2e/
+desktop/
+docs/
+agent-transcripts/
+**/*.test.mjs
+**/*.test.ts
+**/*.test.tsx
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*

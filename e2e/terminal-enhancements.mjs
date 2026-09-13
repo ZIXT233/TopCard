@@ -75,7 +75,7 @@ try {
   assert.equal((await upload).status(),200);
   // Clear the pasted path without executing it, then print searchable output.
   await post(`/api/terminal/${id}`,{type:"input",data:"\x15printf '\\nALPHA_MATCH alpha_match ALPHA_MATCH\\n'\r"});
-  await page.waitForFunction(()=>document.querySelector('.xterm-accessibility')?.textContent.includes('ALPHA_MATCH'));
+  await page.waitForFunction(()=>document.querySelector('.cq-harness-body .xterm-rows')?.textContent?.includes('ALPHA_MATCH'));
   await page.locator('.cq-harness-body .xterm-helper-textarea').focus();
   await page.keyboard.press("Meta+f");
   await page.getByRole("textbox",{name:"Find in terminal"}).fill("ALPHA_MATCH");

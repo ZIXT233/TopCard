@@ -79,8 +79,10 @@ try {
   const cardWindow = await cardPromise;
   await cardWindow.waitForURL(new RegExp(cardId));
   await cardWindow.evaluate(() => { window.desktopReuseMarker = 'retained'; });
+  await page.evaluate(() => { window.desktopMainMarker = 'retained'; });
   await cardWindow.evaluate(() => window.topcardDesktop.openNotification('/?attention=notification-target'));
-  await page.waitForURL(/attention=notification-target/);
+  // Soft-focus must restore main without reloading either window.
+  assert.equal(await page.evaluate(() => window.desktopMainMarker), 'retained');
   assert.equal(new URL(cardWindow.url()).searchParams.get('card'), cardId);
   assert.equal(app.windows().length, 2);
   // A notification sent by any window must restore the already-open target card.

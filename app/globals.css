@@ -358,6 +358,13 @@ html.dark .web-login-error {
   background-color: #111318;
 }
 
+/* Hide xterm caret while ConPTY scrapes CUP cell-by-cell (Windows DOM renderer). */
+.terminal-xterm-host.is-conpty-redraw .xterm-cursor,
+.terminal-xterm-host.is-conpty-redraw .xterm-cursor-outline {
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
@@ -1705,6 +1712,7 @@ span.token.table {
 .terminal-panel { --terminal-bg:#fdf6e3; background:var(--terminal-bg); }
 html.dark .terminal-panel { --terminal-bg:#002b36; }
 .terminal-panel .terminal-xterm .xterm-viewport { background-color:var(--terminal-bg); }
+html .terminal-panel[data-terminal-theme="campbell"] { --terminal-bg:#0C0C0C; background:var(--terminal-bg); }
 
 /* Theme snapshots use only our short reveal, with no competing root animation. */
 ::view-transition-group(root) { animation: none; }

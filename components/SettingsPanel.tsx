@@ -5,6 +5,9 @@ import { useI18n } from "@/hooks/useI18n";
 import { useCompletionNotifications } from "@/hooks/useCompletionNotifications";
 import { useAudio } from "@/hooks/useAudio";
 import { useTheme } from "@/hooks/useTheme";
+import { useAttentionMode } from "@/hooks/useAttentionMode";
+import { ATTENTION_MODES } from "@/lib/attention-mode";
+import { announceQueueToast } from "@/lib/queue-toast";
 import { THEME_OPTIONS } from "@/lib/theme";
 import { ThemeIcon } from "./ThemeIcon";
 import {
@@ -77,6 +80,7 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const audio = useAudio();
   const [audioBlocked, setAudioBlocked] = useState(false);
   const { preference, setThemePreference } = useTheme();
+  const { mode: attentionMode, setMode: setAttentionMode } = useAttentionMode();
   const { fontSize, setFontSize } = useChatAppearance();
   const [shellSettings, setShellSettings] = useState<ShellToolSettingsResponse | null>(null);
   const [shellSaving, setShellSaving] = useState(false);
@@ -170,6 +174,36 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
                   className="sr-only"
                 />
                 <ThemeIcon preference={option.id} />
+                <span className="settings-theme-option-label">{t(option.label)}</span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="settings-general-section">
+        <h3 className="settings-general-heading">{t("settings.attentionMode")}</h3>
+        <div className="settings-attention-mode-copy">
+          <p className="settings-general-description">{t("settings.attentionModeDailyDescription")}</p>
+          <p className="settings-general-description">{t("settings.attentionModeFocusDescription")}</p>
+        </div>
+        <div role="radiogroup" aria-label={t("settings.attentionMode")} className="settings-theme-options settings-attention-mode-options">
+          {ATTENTION_MODES.map((option) => {
+            const selected = attentionMode === option.id;
+            return (
+              <label key={option.id} className="settings-theme-option">
+                <input
+                  type="radio"
+                  name="attention-mode"
+                  value={option.id}
+                  checked={selected}
+                  onChange={() => {
+                    setAttentionMode(option.id);
+                    announceQueueToast(t(option.id === "focus" ? "queue.已切换专注模式说明" : "queue.已切换日常模式说明"));
+                  }}
+                  className="sr-only"
+                />
+                <span className="settings-attention-mode-icon" aria-hidden="true">{option.icon}</span>
                 <span className="settings-theme-option-label">{t(option.label)}</span>
               </label>
             );

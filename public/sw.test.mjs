@@ -110,18 +110,13 @@ test("notification click focuses an existing client at the session URL", async (
   assert.deepEqual(calls, [["message", "notification-click", "https://pi.test/?session=session-1"], "focus"]);
 });
 
-test("notification click navigates an existing client to the session", async () => {
+test("notification click soft-focuses an existing shell without navigate", async () => {
   const calls = [];
-  const navigatedClient = {
-    focus: async () => { calls.push("focus"); },
-  };
   const existingClient = {
     url: "https://pi.test/?session=other-session",
-    navigate: async (url) => {
-      calls.push(["navigate", url]);
-      return navigatedClient;
-    },
-    focus: async () => assert.fail("the navigated client should be focused"),
+    navigate: async () => assert.fail("app shell must soft-focus without navigate"),
+    focus: async () => { calls.push("focus"); },
+    postMessage: message => calls.push(["message", message.type, message.url]),
   };
   self.clients = {
     matchAll: async () => [existingClient],
@@ -132,7 +127,35 @@ test("notification click navigates an existing client to the session", async () 
   await event.pending;
 
   assert.deepEqual(calls, [
-    ["navigate", "https://pi.test/?session=session-1"],
+    ["message", "notification-click", "https://pi.test/?session=session-1"],
+    "focus",
+  ]);
+});
+
+test("notification click prefers the main shell over a detached card window", async () => {
+  const calls = [];
+  const cardWindow = {
+    url: "https://pi.test/?card=card-1",
+    navigate: async () => assert.fail("must not navigate detached card"),
+    focus: async () => assert.fail("must prefer main shell"),
+    postMessage: () => assert.fail("must prefer main shell"),
+  };
+  const mainWindow = {
+    url: "https://pi.test/",
+    navigate: async () => assert.fail("must not navigate"),
+    focus: async () => { calls.push("focus"); },
+    postMessage: message => calls.push(["message", message.type, message.url]),
+  };
+  self.clients = {
+    matchAll: async () => [cardWindow, mainWindow],
+    openWindow: async () => assert.fail("existing client should be reused"),
+  };
+
+  const event = dispatchNotificationClick({ url: "/?attention=card-2" });
+  await event.pending;
+
+  assert.deepEqual(calls, [
+    ["message", "notification-click", "https://pi.test/?attention=card-2"],
     "focus",
   ]);
 });

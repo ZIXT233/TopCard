@@ -22,9 +22,9 @@ test("workspace creation persists once; new sessions select a workspace and pres
     assert.equal(workspace.data.workspaces.length, 1);
     const workspaceId = workspace.data.workspaces[0].id;
     // Simulate a backend restart: saved workspaces remain, memory-only roots do not.
-    const { getAdditionalAllowedRoots } = await jiti.import("../../../lib/allowed-roots.ts");
+    const { getAdditionalAllowedRoots, normalizeSlashes } = await jiti.import("../../../lib/allowed-roots.ts");
     const { getAllowedFileRoots, isExistingFilePathAllowed } = await jiti.import("../../../lib/file-access.ts");
-    getAdditionalAllowedRoots().delete(root);
+    getAdditionalAllowedRoots().delete(normalizeSlashes(root));
     globalThis.__piAllowedRootsCache = undefined;
     assert.equal(isExistingFilePathAllowed(root, await getAllowedFileRoots()), false);
     await GET();

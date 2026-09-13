@@ -3,12 +3,13 @@
 2026-09-12；本轮按用户要求未运行自动测试、未启动 CLI/桌面作交互验证。
 
 - 入口为 `cursor-agent`，不启动 Cursor IDE、不扫描任意桌面会话。
-- 用 --plugin-dir 加载 .cursor-plugin/plugin.json + hooks/hooks.json。命令仅在用户选择后探测，原有用户/项目 hooks 不改写。
-- 订阅 sessionStart、beforeSubmitPrompt、postToolUse、postToolUseFailure、stop；使用 conversation_id（回退 session_id）记录身份，--resume <ID> 续接。
+- 用 --plugin-dir 加载会话级插件脚本。Cursor TUI 在派发 beforeSubmitPrompt / stop / afterAgentResponse 前只检查 user/project hooks，因此启动时把同一组命令合并进 ~/.cursor/hooks.json（识别并替换 TopCard 自己的条目，保留用户其他 hooks）。Windows 上只调用 node helper（不经 PowerShell/`set`），信号目录靠插件旁的 active.json；没有 TopCard 信号环境时 helper 立刻退出。观察类 hook（含 afterAgentResponse）先写信号再回 JSON，避免 Cursor 收完 stdout 后掐掉进程导致通知拿不到回复摘要。
+- active.json 按 conversation_id 路由：新卡片进入 pending，仅 sessionStart 认领；已绑定会话写入 sessions。IDE/其他聊天的 beforeSubmitPrompt 不会抢占 pending，也不会改写本卡片的 providerSessionId。
+- 订阅 sessionStart、beforeSubmitPrompt、postToolUse、postToolUseFailure、afterAgentResponse、stop、sessionEnd；使用 conversation_id（回退 session_id）记录身份，--resume <ID> 续接。
 - beforeSubmitPrompt 返回 {continue:true}，其他观察事件返回 {}。没有安装会返回 allow 的权限 hooks。普通工具完成不是一轮完成。
-- 当前覆盖提交/完成；尚无独立原生 PermissionRequest 适配，批准等待可能仍显示工作中。未收到 hook 时显示待确认，不靠输出安静推断完成。
+- 当前覆盖提交/完成；尚无独立原生 PermissionRequest 适配，批准等待可能仍显示工作中。hook 落盘或 SSH OSC 到达后由 /api/card-queue/events 推送，页面立刻对账；未收到 hook 时显示待确认，不靠输出安静推断完成。
 - 标题使用本进程首次收到的 prompt；原会话历史标题和 IDE 内重命名尚未接入读取。切换会话后清旧标题。
-- SSH 专用 OSC 回传方案同 Claude，需要远端 Node.js；不写远端全局 hooks.json。不支持 --plugin-dir 的旧 CLI 需升级。
+- SSH 同样合并远端 ~/.cursor/hooks.json，并用 OSC 回传；需要远端 Node.js。不支持 --plugin-dir 的旧 CLI 需升级。
 - Shell 是独立类型，用于本地／远程操作，默认不自动通知，运行超过 300ms 后可手动放入后台并在完成时通知；终端退出仍保留内容、允许重新打开。
 
 ## 参考

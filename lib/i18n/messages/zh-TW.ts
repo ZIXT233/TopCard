@@ -665,6 +665,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.followUpHint": "在 Agent 完成後排入此訊息",
     "chat.inputHistory": "輸入紀錄",
     "chat.modelsLoading": "正在載入可用模型…",
+    "chat.modelsRequiredTitle": "先設定模型，再開始對話",
     "chat.modelsUnavailable": "可用模型載入失敗，請重試或開啟模型設定。",
     "chat.noAvailableModels": "暫無可用模型。請設定模型或啟用 Pi provider 外掛，然後重新整理。",
     "chat.configureModels": "模型設定",

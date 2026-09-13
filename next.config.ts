@@ -14,6 +14,7 @@ try {
 const nextConfig: NextConfig = {
   ...(process.env.TOPCARD_DESKTOP_BUILD === "1" ? {
     output: "standalone" as const,
+    distDir: ".next-desktop",
     // Desktop serves local image assets directly. No server image transformer
     // is needed; attachment processing uses the browser / Pi's own image path.
     images: { unoptimized: true },

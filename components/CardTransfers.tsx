@@ -1,9 +1,17 @@
 "use client";
 
 import { Component, createRef, type ReactNode } from "react";
+import { shouldQuietRearQueueArrival, type AttentionMode } from "@/lib/attention-mode";
+import { queueArrivalSide } from "@/lib/queue-arrival";
 
 type Zone = "working" | "attention";
-type Props = { order: string[]; locations: Record<string, Zone>; children: ReactNode };
+type Props = {
+  order: string[];
+  locations: Record<string, Zone>;
+  children: ReactNode;
+  attentionMode?: AttentionMode;
+  focusedId?: string | null;
+};
 type Snapshot = { flights: Flight[]; layout: { id: string; transform: string }[] };
 type Flight = { id: string; zone: Zone; rect: DOMRect; image: HTMLElement };
 
@@ -18,6 +26,13 @@ export class CardTransfers extends Component<Props> {
 
   private surface(id: string, zone: Zone) {
     return this.root.current?.querySelector<HTMLElement>(`[data-transfer-id="${CSS.escape(id)}"][data-transfer-zone="${zone}"]`);
+  }
+
+  private quietAttentionFlight(id: string, zone: Zone) {
+    if (zone !== "attention") return false;
+    const side = queueArrivalSide(this.props.order, this.props.focusedId, id);
+    if (!side) return false;
+    return shouldQuietRearQueueArrival(this.props.attentionMode ?? "daily", side, document.visibilityState);
   }
 
   getSnapshotBeforeUpdate(previous: Props): Snapshot {
@@ -41,6 +56,7 @@ export class CardTransfers extends Component<Props> {
     const snapshots: Flight[] = [];
     for (const [id, zone] of Object.entries(this.props.locations)) {
       if (!previous.locations[id] || previous.locations[id] === zone) continue;
+      if (this.quietAttentionFlight(id, zone)) continue;
       this.flights.get(id)?.();
       const source = surfaces.get(`${previous.locations[id]}:${id}`);
       if (!source) continue;

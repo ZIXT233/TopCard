@@ -1,5 +1,7 @@
 import type { HarnessState } from "./types.ts";
-export interface HookSignal { kind?: string; at: number; event: string; replyPreview?: string; sessionId?: string; agentId?: string; tool?: string; prompt?: string; title?: string; notification?: string }
+import { normalizeHookSignal, type HookSignal } from "./hook-contract.ts";
+export type { HookSignal } from "./hook-contract.ts";
+
 export interface ProbeState {
   replyPreview?: string;
   antigravityCompleted?: boolean;
@@ -21,34 +23,45 @@ export interface ProbeState {
 // Event mapping follows Orca's Codex adapter (MIT, attribution in docs/harness).
 // TopCard schedules the interactive root TUI, not a roster of background agents.
 export function hookState(event: HookSignal): HarnessState | undefined {
-  if (event.agentId) return undefined;
+  const signal = normalizeHookSignal(event);
+  if (signal.agentId) return undefined;
   if (event.event === "Notification" && ["permission_prompt", "ToolPermission"].includes(event.notification ?? "")) return "attention";
   if (event.event === "Notification" && event.notification === "idle_prompt") return "attention";
-  if (event.event === "PermissionRequest") return "attention";
+  if (signal.event === "PermissionRequest") return "attention";
   if (["PreToolUse", "BeforeTool"].includes(event.event) && /(^|[/.])(request_user_input|ask_user_question|AskUserQuestion)$/.test(event.tool ?? "")) return "attention";
-  if (["PreInvocation", "PostInvocation", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "beforeSubmitPrompt", "postToolUse", "postToolUseFailure", "BeforeAgent", "BeforeTool", "AfterTool"].includes(event.event)) return "working";
-  if (["Stop", "StopFailure", "StopCancelled", "stop", "sessionEnd", "AfterAgent"].includes(event.event)) return "attention";
-  // SessionStart proves identity and hook delivery, but does not prove a turn started.
+  if (signal.event === "UserPromptSubmit") return "working";
+  if (signal.event === "Stop") return "attention";
   return undefined;
 }
-export function observeHook(current: ProbeState, signal: HookSignal): ProbeState {
+
+const identityStartEvents = new Set(["SessionStart", "sessionStart", "PreInvocation"]);
+const cursorEvents = new Set(["sessionStart", "beforeSubmitPrompt", "postToolUse", "postToolUseFailure", "afterAgentResponse", "stop", "sessionEnd"]);
+
+export function observeHook(current: ProbeState, raw: HookSignal): ProbeState {
+  const signal = normalizeHookSignal(raw);
   if (!Number.isFinite(signal.at) || signal.agentId) return current;
   if (typeof signal.event !== "string") return current;
   const sessionId = typeof signal.sessionId === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(signal.sessionId) ? signal.sessionId : undefined;
+  const identityStart = identityStartEvents.has(signal.event) || identityStartEvents.has(raw.event);
+  // Cursor user hooks are global: IDE/other chats must not steal this card's identity
+  // or push it into working before our own sessionStart binds the launch.
+  if (sessionId && current.sessionId && sessionId !== current.sessionId && !identityStart) return current;
+  if ((signal.kind === "cursor" || raw.kind === "cursor" || cursorEvents.has(raw.event)) && sessionId && !current.sessionId && !identityStart) return current;
   const cleanTitle = (value: unknown) => typeof value === "string" ? value.replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 160) || undefined : undefined;
   const newIdentity = sessionId && sessionId !== current.sessionId;
   const title = cleanTitle(signal.title) ?? (!newIdentity ? current.title : undefined) ?? cleanTitle(signal.prompt);
   const identity = sessionId && signal.at >= (current.identityAt ?? 0) ? { sessionId, sessionIdPrefix: undefined, identityAt: signal.at, title } : {};
   if (signal.at < current.at) return { ...current, hookSeen: true, ...identity };
-  if (signal.kind === "antigravity" && current.antigravityCompleted && !newIdentity && signal.event !== "PreInvocation" && signal.event !== "Stop") return current;
-  const state = hookState(signal);
+  if (signal.kind === "antigravity" && current.antigravityCompleted && !newIdentity && raw.event !== "PreInvocation" && signal.event !== "Stop") return current;
+  const state = hookState(raw);
   return { ...current, hookSeen: true, ...identity,
     ...(signal.kind === "antigravity" ? { antigravityCompleted: signal.event === "Stop" } : {}),
     replyPreview: state === "working" ? undefined : cleanTitle(signal.replyPreview) ?? (newIdentity ? undefined : current.replyPreview),
-    ...(!state && ["SessionStart", "sessionStart"].includes(signal.event) && current.state === "starting" ? { state: "attention" as const } : {}),
+    ...(!state && signal.event === "SessionStart" && current.state === "starting" ? { state: "attention" as const } : {}),
     ...(state ? { state, at: signal.at, source: "hook" as const } : {}),
   };
 }
+
 export function observeTitle(current: ProbeState, state: HarnessState, at: number, hooksAuthoritative = false): ProbeState {
   if (hooksAuthoritative && current.hookSeen) return { ...current, titleSeen: true, titleState: state };
   // A repeated spinner must not override a newer approval hook with an old working title.

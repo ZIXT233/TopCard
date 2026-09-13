@@ -4,7 +4,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { hasUrgentCall } from "@/lib/urgent-call";
 import type { QueueCard } from "@/lib/card-queue";
-import { isDeckCardOffscreenLeft, deckStep, projectDeckCard } from "@/lib/card-deck";
+import { isDeckCardOffscreenLeft, deckStep, peekDeckIndexAtPoint, projectDeckCard } from "@/lib/card-deck";
 
 // Fractional scroll frames only update the layer; conversation trees render on
 // card/focus changes, not on every transform update.
@@ -62,6 +62,15 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     const scrollToCard = (index: number) => {
       element.scrollTo({ left: index * stepRef.current,
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    };
+    const peekIndexFromPoint = (clientX: number, clientY: number) => {
+      const selected = Math.round(element.scrollLeft / stepRef.current);
+      const front = element.querySelector<HTMLElement>('.cq-deck-layer[aria-hidden="false"]');
+      const layers = [...element.querySelectorAll<HTMLElement>('.cq-deck-layer[aria-hidden="true"]')].map((layer) => {
+        const rect = layer.getBoundingClientRect();
+        return { index: Number(layer.dataset.deckIndex), z: Number(layer.style.zIndex) || 0, ...rect };
+      });
+      return peekDeckIndexAtPoint(clientX, clientY, selected, front?.getBoundingClientRect() ?? null, layers);
     };
     navigationRef.current = (direction) => {
       const maxIndex = Math.max(0, Math.round((element.scrollWidth - element.clientWidth) / stepRef.current));
@@ -123,22 +132,36 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stepRef.current : 1;
       element.scrollBy({ left: event.deltaY * unit, behavior: "instant" });
     };
-    let drag: { id: number; startX: number; startScroll: number; moved: boolean } | null = null;
+    // Defer capture until the pointer actually moves so a click on a blurred
+    // neighbor can still fire; starting a drag immediately was swallowing it.
+    let drag: { id: number; startX: number; startScroll: number; moved: boolean; peek: number | null } | null = null;
     let suppressClickUntil = 0;
+    const peekFromTarget = (target: Element | null, clientX: number, clientY: number) => {
+      const layer = target?.closest<HTMLElement>(".cq-deck-layer[aria-hidden='true']");
+      if (layer) {
+        const index = Number(layer.dataset.deckIndex);
+        const current = Math.round(element.scrollLeft / stepRef.current);
+        if (Number.isInteger(index) && Math.abs(index - current) === 1) return index;
+      }
+      return peekIndexFromPoint(clientX, clientY);
+    };
     const onPointerDown = (event: PointerEvent) => {
       // Touch uses native panning too. Only a held mouse button needs emulation.
       if (event.pointerType !== "mouse" || !event.isPrimary || event.button !== 0 || drag) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest("button,a,input,textarea,select,summary,[contenteditable],[role=button]")) return;
+      const peekHit = target?.closest(".cq-deck-peek-hit");
+      if (!peekHit && target?.closest("button,a,input,textarea,select,summary,[contenteditable],[role=button]")) return;
       const front = element.querySelector('.cq-deck-layer[aria-hidden="false"]');
       const rect = front?.getBoundingClientRect();
-      if (rect && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) return;
+      if (!peekHit && rect && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) return;
       stopKeyboard();
-      element.classList.add("cq-pointer-drag");
-      element.scrollTo({ left: element.scrollLeft, behavior: "instant" });
-      drag = { id: event.pointerId, startX: event.clientX, startScroll: element.scrollLeft, moved: false };
-      surface.setPointerCapture(event.pointerId);
-      event.preventDefault();
+      drag = {
+        id: event.pointerId,
+        startX: event.clientX,
+        startScroll: element.scrollLeft,
+        moved: false,
+        peek: peekFromTarget(target, event.clientX, event.clientY),
+      };
     };
     const onPointerMove = (event: PointerEvent) => {
       if (!drag || drag.id !== event.pointerId) return;
@@ -146,6 +169,10 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       if (!drag.moved && Math.abs(travel) < 6) return;
       if (!drag.moved) {
         drag.moved = true;
+        drag.peek = null;
+        element.classList.add("cq-pointer-drag");
+        element.scrollTo({ left: element.scrollLeft, behavior: "instant" });
+        surface.setPointerCapture(event.pointerId);
         surface.classList.add("cq-deck-dragging");
         surface.dispatchEvent(new Event("cq-deck-drag-start", { bubbles: true }));
       }
@@ -155,6 +182,7 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     const endDrag = (event: PointerEvent) => {
       if (!drag || drag.id !== event.pointerId) return;
       const moved = drag.moved;
+      const peek = drag.peek;
       const targetIndex = Math.round(element.scrollLeft / stepRef.current);
       drag = null;
       surface.classList.remove("cq-deck-dragging");
@@ -163,10 +191,22 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       if (moved) {
         suppressClickUntil = performance.now() + 250;
         scrollToCard(targetIndex);
+        return;
+      }
+      if (peek != null) {
+        suppressClickUntil = performance.now() + 250;
+        scrollToCard(peek);
       }
     };
     const onClick = (event: MouseEvent) => {
-      if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
+      if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); return; }
+      const target = event.target instanceof Element ? event.target : null;
+      const peekHit = target?.closest(".cq-deck-peek-hit");
+      if (!peekHit && target?.closest("button,a,input,textarea,select,summary,[contenteditable],[role=button]")) return;
+      const peek = peekFromTarget(target, event.clientX, event.clientY);
+      if (peek == null) return;
+      event.preventDefault();
+      scrollToCard(peek);
     };
     element.addEventListener("scrollend", onScrollEnd);
     surface.addEventListener("wheel", onWheel, { capture: true, passive: false });
@@ -189,7 +229,7 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       surface.removeEventListener("pointercancel", endDrag);
       surface.removeEventListener("lostpointercapture", endDrag);
       surface.removeEventListener("click", onClick, true);
-      surface.classList.remove("cq-deck-dragging");
+      surface.classList.remove("cq-deck-dragging", "cq-deck-peek-hover");
       element.classList.remove("cq-pointer-drag");
       if (drag && surface.hasPointerCapture(drag.id)) surface.releasePointerCapture(drag.id);
     };
@@ -262,9 +302,13 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
           const { distance, x, scale } = projectDeckCard(index, position, width);
           if (isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5) return null;
           const isFront = index === selected;
-          return <div key={card.id} className="cq-deck-layer" data-preview={distance >= 2} data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="attention" data-deck-index={index} data-deck-position={position.toFixed(4)} aria-hidden={!isFront} inert={!isFront}
-            style={{ transform: `translate3d(${x}px, 0, 0) scale(${scale})`, zIndex: cards.length - index, pointerEvents: isFront ? "auto" : "none" }}>
-            {distance < 2 ? <DeckContent card={card} isFront={isFront} renderCard={renderCard} /> : <div className="cq-back-card" />}
+          const isNeighbor = Math.abs(index - selected) === 1;
+          return <div key={card.id} className="cq-deck-layer" data-preview={distance >= 2} data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="attention" data-deck-index={index} data-deck-position={position.toFixed(4)} aria-hidden={!isFront}
+            style={{ transform: `translate3d(${x}px, 0, 0) scale(${scale})`, zIndex: cards.length - index, pointerEvents: "auto" }}>
+            <div className="cq-deck-layer-body" inert={!isFront}>
+              {distance < 2 ? <DeckContent card={card} isFront={isFront} renderCard={renderCard} /> : <div className="cq-back-card" />}
+            </div>
+            {isNeighbor ? <button type="button" className="cq-deck-peek-hit" tabIndex={-1} aria-label={index < selected ? t("queue.上一张卡片") : t("queue.下一张卡片")} /> : null}
           </div>;
         })}
       </div>

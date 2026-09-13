@@ -1,6 +1,33 @@
 import type { CardQueue } from "./card-queue.ts";
 import type { SessionInfo } from "./types.ts";
 
+/** Keep the previous object when a poll only rebuilt the same JSON. */
+export function reuseIfEqual<T>(current: T, next: T): T {
+  return current !== undefined && JSON.stringify(current) === JSON.stringify(next) ? current : next;
+}
+
+export const QUEUE_LIVE_POLL_MS = 8_000;
+export const QUEUE_HIDDEN_POLL_MS = 20_000;
+export const QUEUE_OFFLINE_POLL_MS = 1_200;
+export const QUEUE_OFFLINE_HIDDEN_POLL_MS = 3_000;
+
+/** Busy boards stay at 1.2s so hook transitions land; idle boards can wait. */
+export function queuePollIntervalMs(queue: CardQueue | null, visible: boolean): number {
+  if (!visible) return QUEUE_LIVE_POLL_MS;
+  if (!queue) return QUEUE_OFFLINE_POLL_MS;
+  const busy = queue.cards.some((card) => card.archivedAt === undefined && (
+    card.phase === "working"
+    || card.harness?.state === "working"
+    || card.harness?.state === "starting"
+  ));
+  return busy ? QUEUE_OFFLINE_POLL_MS : 4_000;
+}
+
+export function queueFallbackPollMs(visible: boolean, liveConnected: boolean): number {
+  if (liveConnected) return visible ? QUEUE_LIVE_POLL_MS : QUEUE_HIDDEN_POLL_MS;
+  return visible ? QUEUE_OFFLINE_POLL_MS : QUEUE_OFFLINE_HIDDEN_POLL_MS;
+}
+
 /** Polls are complete JSON snapshots; preserve identities for unchanged cards. */
 export function mergeQueueSnapshot(previous: CardQueue | null, next: CardQueue): CardQueue {
   if (!previous) return next;

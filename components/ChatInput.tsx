@@ -52,8 +52,6 @@ interface Props {
   modelList?: { id: string; name: string; provider: string; input?: string[] }[];
   modelError?: string | null;
   newSessionModelBlock?: string | null;
-  onOpenModelSettings?: () => void;
-  onRetryModels?: () => void;
   /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
   modelScopeWarnings?: string[];
   onModelChange?: (provider: string, modelId: string) => void;
@@ -500,7 +498,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, newSessionModelBlock, onOpenModelSettings, onRetryModels, modelScopeWarnings, onModelChange, modelSwitching,
+  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, newSessionModelBlock, modelScopeWarnings, onModelChange, modelSwitching,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
@@ -1566,11 +1564,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }}
       />}
       <div>
-        {newSessionModelBlock && <div role="status" style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: 12 }}>
-          <span>{newSessionModelBlock}</span>
-          {onOpenModelSettings && <button type="button" onClick={onOpenModelSettings} style={{ marginLeft: 8 }}>{t("chat.configureModels")}</button>}
-          {onRetryModels && <button type="button" onClick={onRetryModels} style={{ marginLeft: 8 }}>{t("chat.retryModels")}</button>}
-        </div>}
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
         {showImageUnsupportedWarning && (() => {

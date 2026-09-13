@@ -14,7 +14,6 @@
 | `src/main/cursor/hook-events.ts`, `hook-script.ts`, `hook-service.ts` | `lib/harness/hook-launch.ts`, `bin/harness-hook.cjs` | 事件及响应格式；不自动批准工具 |
 | `src/main/grok/grok-hook-config.ts`, `grok-hook-config-file.ts` | `lib/harness/hook-launch.ts`, `bin/harness-hook.cjs` | 独立全局 hooks 文件，兼容大小写字段；不是 TUI --plugin-dir |
 | `src/main/gemini/hook-service.ts` | `lib/harness/hook-launch.ts` | hooks 生命周期；保留原系统默认配置后追加 |
-| `src/main/opencode/status-plugin-lifecycle-source.ts`, `status-plugin-session-lineage-source.ts` | `bin/harness-opencode.mjs` | busy/idle、根会话过滤、两代 SDK session.get；未复刻子代理注意力聚合 |
 
 Pi CLI 使用 Pi 原生 extension 事件，完成边界为 agent_settled。TopCard 原生 Pi 会话不受影响。
 

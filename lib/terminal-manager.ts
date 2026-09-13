@@ -12,7 +12,7 @@ export type TerminalEvent =
 type TerminalListener = (event: TerminalEvent) => void;
 
 export interface TerminalLaunch {
-  executable: string; args: string[]; persistent?: boolean; env?: Record<string, string>;
+  executable: string; args: string[] | string; persistent?: boolean; env?: Record<string, string>;
   onOutput?: (data: string) => void;
 }
 

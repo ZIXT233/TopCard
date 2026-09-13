@@ -996,6 +996,26 @@ html.dark .settings-dialog-surface {
   padding: 3px;
 }
 
+.settings-attention-mode-copy {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.settings-attention-mode-copy .settings-general-description {
+  margin-bottom: 0;
+}
+
+.settings-attention-mode-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 420px;
+}
+
+.settings-attention-mode-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
 .settings-theme-option {
   position: relative;
   display: flex;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { harnessTerminalTheme } from "@/lib/terminal-theme";
+import { harnessTerminalTheme, resolveTerminalThemeProfile, terminalThemeHostFromDocument, type TerminalThemeProfile } from "@/lib/terminal-theme";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { enhancedTerminalKey, decodeTerminalClipboard } from "@/lib/terminal-enhancements";
@@ -19,7 +19,8 @@ interface Props {
   onOutput?: (data: string) => void;
   onStatusChange?: (status: TerminalConnectionStatus) => void;
   embedded?: boolean;
-  themeProfile?: "grok";
+  themeProfile?: TerminalThemeProfile;
+  remote?: boolean;
   readOnly?: boolean;
   tab: TerminalTab;
   active: boolean;
@@ -28,7 +29,12 @@ interface Props {
   onCloseError: () => void;
 }
 
-export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile }: Props) {
+function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote: boolean | undefined): TerminalThemeProfile | undefined {
+  if (typeof document === "undefined") return themeProfile === "grok" ? "grok" : undefined;
+  return resolveTerminalThemeProfile(themeProfile, terminalThemeHostFromDocument(remote, document.documentElement, navigator));
+}
+
+export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false }: Props) {
   const { t } = useI18n();
   const { id, cwd, restored } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -85,25 +91,45 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     setError(null);
     setExitCode(null);
 
+    const conptyHost = !remote && typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+    let conptyCursorHidden = false;
+    let conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
+    const liveTheme = () => harnessTerminalTheme(document.documentElement.classList.contains("dark"), liveThemeProfile(themeProfile, remote));
     const terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: !conptyHost,
       allowProposedApi: true,
       fontFamily: getComputedStyle(container).getPropertyValue("--font-mono").trim() || "monospace",
       fontSize: 13,
       lineHeight: 1.25,
       scrollback: 8000,
-      screenReaderMode: true,
+      // xterm 6.0.0 + screenReaderMode re-sends the trailing character when an
+      // IME commits in the middle of a line (xtermjs/xterm.js#5456 / PR #5698).
+      // Re-enable after upgrading past that CompositionHelper fix.
+      screenReaderMode: false,
       disableStdin: true,
-      theme: harnessTerminalTheme(document.documentElement.classList.contains("dark"), themeProfile),
+      windowsPty: conptyHost ? { backend: "conpty", buildNumber: 26200 } : undefined,
+      theme: liveTheme(),
     });
     const themeObserver = new MutationObserver(() => {
-      terminal.options.theme = harnessTerminalTheme(document.documentElement.classList.contains("dark"), themeProfile);
+      terminal.options.theme = liveTheme();
     });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "data-desktop-platform"] });
     terminalRef.current = terminal;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container);
+    const hideConptyCursor = () => {
+      if (!conptyHost) return;
+      clearTimeout(conptyRevealTimer);
+      if (!conptyCursorHidden) {
+        conptyCursorHidden = true;
+        container.classList.add("is-conpty-redraw");
+      }
+      conptyRevealTimer = setTimeout(() => {
+        conptyCursorHidden = false;
+        if (!disposed) container.classList.remove("is-conpty-redraw");
+      }, 40);
+    };
     // Let native horizontal gestures reach the card deck without xterm turning
     // them into terminal input or cancelling them. Vertical terminal scrolling
     // and detached terminals keep their existing behavior.
@@ -125,23 +151,48 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       if (text !== null) void copyText(text).catch(() => { if (!disposed) setClipboardPending(text); });
       return true;
     });
-    // Load only in the browser; keep the DOM renderer if GPU setup is unavailable.
+    // WebGL draws the caret into the canvas, so ConPTY cursor hiding needs DOM.
     let gpu: import("@xterm/addon-webgl").WebglAddon | undefined;
     let gpuLoss: { dispose(): void } | undefined;
-    void import("@xterm/addon-webgl").then(({ WebglAddon }) => {
-      if (disposed) return;
-      const addon = new WebglAddon();
-      try {
-        terminal.loadAddon(addon);
-        gpu = addon;
-        gpuLoss = addon.onContextLoss(() => {
-          gpuLoss?.dispose(); gpuLoss = undefined;
-          gpu?.dispose(); gpu = undefined;
+    if (!conptyHost) {
+      void import("@xterm/addon-webgl").then(({ WebglAddon }) => {
+        if (disposed) return;
+        const addon = new WebglAddon();
+        try {
+          terminal.loadAddon(addon);
+          gpu = addon;
+          gpuLoss = addon.onContextLoss(() => {
+            gpuLoss?.dispose(); gpuLoss = undefined;
+            gpu?.dispose(); gpu = undefined;
+            terminal.refresh(0, terminal.rows - 1);
+          });
           terminal.refresh(0, terminal.rows - 1);
-        });
-        terminal.refresh(0, terminal.rows - 1);
-      } catch { addon.dispose(); }
-    }).catch(() => { /* DOM rendering remains available. */ });
+        } catch { addon.dispose(); }
+      }).catch(() => { /* DOM rendering remains available. */ });
+    }
+    const writer = createTerminalWriter(id, (reason) => {
+      if (disposed) return;
+      inputFailed = true;
+      terminal.options.disableStdin = true;
+      setError(reason.message);
+      setStatus("error");
+    });
+    writerRef.current = writer;
+    let pendingInput = "";
+    let inputRaf = 0;
+    const flushInput = () => {
+      inputRaf = 0;
+      const data = pendingInput;
+      pendingInput = "";
+      if (data && connected && !exited && !inputFailed && !sessionReadOnly) writer.write(data);
+    };
+    const sendInput = (data: string) => {
+      if (!connected || exited || inputFailed || sessionReadOnly || terminal.options.disableStdin) return;
+      if (!conptyHost) { writer.write(data); return; }
+      // One HTTP POST per animation frame instead of one per keystroke.
+      pendingInput += data;
+      if (!inputRaf) inputRaf = requestAnimationFrame(flushInput);
+    };
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown" || event.isComposing || event.keyCode === 229) return true;
       const mac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -156,20 +207,11 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       const data = enhancedTerminalKey(event, mac);
       if (data !== null) {
         event.preventDefault(); event.stopPropagation();
-        if (connected && !exited && !inputFailed && !sessionReadOnly && !terminal.options.disableStdin) writer.write(data);
+        sendInput(data);
         return false;
       }
       return true;
     });
-
-    const writer = createTerminalWriter(id, (reason) => {
-      if (disposed) return;
-      inputFailed = true;
-      terminal.options.disableStdin = true;
-      setError(reason.message);
-      setStatus("error");
-    });
-    writerRef.current = writer;
     const paste = (event: ClipboardEvent) => {
       const files = Array.from(event.clipboardData?.items ?? [])
         .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
@@ -183,6 +225,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         return;
       }
       setError(null);
+      if (inputRaf) { cancelAnimationFrame(inputRaf); flushInput(); }
       writer.pasteImages(files, terminal.modes.bracketedPasteMode);
     };
     // Capture before xterm's text-only paste listener consumes the clipboard.
@@ -205,14 +248,19 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         const files = droppedFiles(event.dataTransfer);
         const reason = dropFilesError(files);
         if (reason) throw new Error(reason);
-        if (files.length) { setError(null); writer.pasteFiles(files, terminal.modes.bracketedPasteMode); terminal.focus(); }
+        if (files.length) {
+          setError(null);
+          if (inputRaf) { cancelAnimationFrame(inputRaf); flushInput(); }
+          writer.pasteFiles(files, terminal.modes.bracketedPasteMode);
+          terminal.focus();
+        }
       } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     };
     container.addEventListener("dragover", dragOver);
     container.addEventListener("dragleave", dragLeave);
     container.addEventListener("drop", drop);
     const onData = terminal.onData((data) => {
-      if (connected && !exited && !inputFailed && !sessionReadOnly) writer.write(data);
+      sendInput(data);
     });
     const fitAndResize = () => {
       if (!container.offsetWidth || !container.offsetHeight) return;
@@ -232,6 +280,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         const event = JSON.parse(message.data) as TerminalEvent;
         if (event.type === "output") {
           if (!event.reset && offset !== undefined && event.offset <= offset) return;
+          hideConptyCursor();
           outputQueue = outputQueue.then(() => new Promise<void>((resolve) => {
             if (disposed) { resolve(); return; }
             replaying = event.reset === true;
@@ -299,6 +348,10 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     window.addEventListener("online", connect);
     return () => {
       disposed = true;
+      clearTimeout(conptyRevealTimer);
+      if (inputRaf) cancelAnimationFrame(inputRaf);
+      if (pendingInput) writer.write(pendingInput);
+      pendingInput = "";
       events?.close();
       void writer.stop();
       resizeObserver.disconnect();
@@ -322,7 +375,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, [id, cwd, restored, reconnectKey, readOnly, themeProfile]);
+  }, [id, cwd, restored, reconnectKey, readOnly, themeProfile, remote]);
 
   useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
 
@@ -349,7 +402,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
   }, [id, tab.closing]);
 
   return (
-    <section className={`terminal-panel${dragging ? " terminal-file-drag" : ""}${embedded ? " terminal-panel-embedded" : ""}`} data-terminal-theme={themeProfile} aria-label={t("terminal.title")}>
+    <section className={`terminal-panel${dragging ? " terminal-file-drag" : ""}${embedded ? " terminal-panel-embedded" : ""}`} data-terminal-theme={liveThemeProfile(themeProfile, remote)} suppressHydrationWarning aria-label={t("terminal.title")}>
       {!embedded && <header className="terminal-panel-header">
         <div className="terminal-panel-path">
           <span className={`terminal-status-dot is-${status}`} title={t(`terminal.${status}`)} />

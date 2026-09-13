@@ -3,9 +3,46 @@
   "version": "0.1.0",
   "description": "Scheduling human attention across parallel agents.",
   "license": "MIT",
+  "homepage": "https://github.com/ZIXT233/TopCard#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZIXT233/TopCard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZIXT233/TopCard/issues"
+  },
+  "keywords": [
+    "topcard",
+    "agent",
+    "queue",
+    "pi",
+    "cli"
+  ],
   "engines": {
     "node": ">=22.19.0"
   },
+  "bin": {
+    "topcard": "bin/topcard.js",
+    "pi-web": "bin/pi-web.js"
+  },
+  "files": [
+    "app",
+    "bin",
+    "components",
+    "hooks",
+    "lib",
+    "public",
+    "instrumentation.ts",
+    "proxy.ts",
+    "next.config.ts",
+    "postcss.config.mjs",
+    "tailwind.config.ts",
+    "tsconfig.json",
+    ".next",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
   "scripts": {
     "postinstall": "node bin/prepare-terminal.js",
     "dev": "next dev -H 127.0.0.1 -p 30141",
@@ -16,12 +53,14 @@
     "lint": "eslint .",
     "test:terminal": "node e2e/terminal.mjs",
     "test:e2e": "node e2e/run.mjs",
-    "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
+    "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"desktop/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
     "desktop:dev": "electron . --dev",
     "desktop:build": "node desktop/build.mjs",
+    "desktop:build:force": "node desktop/build.mjs --force",
     "desktop:start": "electron .",
     "desktop:package": "npm run desktop:build && electron-builder --config desktop/builder.cjs",
-    "test:desktop": "node e2e/desktop.mjs"
+    "test:desktop": "node e2e/desktop.mjs",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",
@@ -75,6 +114,5 @@
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
   },
-  "private": true,
   "main": "desktop/main.cjs"
 }

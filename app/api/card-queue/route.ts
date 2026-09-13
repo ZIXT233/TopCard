@@ -11,6 +11,7 @@ import { stat, mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { withCardQueue } from "@/lib/card-queue-store";
+import { ensureQueueLiveWatch } from "@/lib/card-queue-live";
 import { reconcileQueue, archiveCard, deferCard, moveCard, releaseCard, TAB_LEASE_MS, type CardQueue } from "@/lib/card-queue";
 import { getRpcSession, getRpcSessionInfos, getRunningRpcSessionIds } from "@/lib/rpc-manager";
 import { listAllSessions, mergeSessionLists } from "@/lib/session-reader";
@@ -74,10 +75,14 @@ function selectWorkspaceForDraft(state: CardQueue, workspace: NonNullable<CardQu
 }
 
 export async function GET() {
+  const started = Date.now();
   try {
-    const state = await withCardQueue(async (state) => { await sync(state); return state; });
+    await ensureQueueLiveWatch();
+    const state = await withCardQueue(async (state) => { await sync(state); return state; }, { silent: true });
+    console.log(`[card-queue] ${Date.now() - started}ms cards=${state.cards.length}`);
     return NextResponse.json({ ...state, defaultCwd: process.cwd() }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    console.log(`[card-queue] ${Date.now() - started}ms error=${String(error)}`);
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

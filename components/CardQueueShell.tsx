@@ -40,6 +40,9 @@ import { getLastSettingsSection, type SettingsSection } from "@/lib/settings-nav
 import { DetachedCardTools, type DetachedCardLayoutControls } from "./DetachedCardTools";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { useAudio } from "@/hooks/useAudio";
+import { useAttentionMode } from "@/hooks/useAttentionMode";
+import { ATTENTION_MODES, shouldQuietRearQueueArrival, type AttentionMode } from "@/lib/attention-mode";
+import { QUEUE_TOAST_EVENT } from "@/lib/queue-toast";
 import { latestAssistantReply, queueArrivalSide } from "@/lib/queue-arrival";
 import { QueueArrivalPreview, type QueueArrivalNotice } from "./QueueArrivalPreview";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
@@ -200,11 +203,13 @@ export function CardQueueShell() {
   const requestedAttentionId = params.get("attention");
   const { queue, defaultCwd, error: connectionError, refresh, act, markWorking, rollbackWorking } = useCardQueue();
   const notifications = useCompletionNotifications(queue);
+  const { mode: attentionMode, setMode: setAttentionMode } = useAttentionMode();
   const { soundEnabled, onSoundToggle, unlockAudio, playDoneSound, playQueueArrivalSound } = useAudio();
   const audio = useMemo(() => ({ soundEnabled, onSoundToggle, playDoneSound, unlockAudio }), [soundEnabled, onSoundToggle, playDoneSound, unlockAudio]);
   const previousSoundCards = useRef<QueueCard[] | null>(null);
   // Both the management surface and detached tabs follow cross-tab changes.
   const { preference, setThemePreference } = useTheme();
+  const attentionOption = ATTENTION_MODES.find((option) => option.id === attentionMode) ?? ATTENTION_MODES[0];
   useViewportHeight();
   const [inspecting, setInspecting] = useState<string | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -237,6 +242,27 @@ export function CardQueueShell() {
   const openedSessionRef = useRef<string | null>(null);
   const [urgentAlerts, setUrgentAlerts] = useState<Set<string> | null>(null);
   const [arrivalNotices, setArrivalNotices] = useState<QueueArrivalNotice[]>([]);
+  const [queueToast, setQueueToast] = useState("");
+  const queueToastTimer = useRef<number | null>(null);
+  const showQueueToast = useCallback((message: string) => {
+    if (queueToastTimer.current) window.clearTimeout(queueToastTimer.current);
+    setQueueToast(message);
+    queueToastTimer.current = window.setTimeout(() => {
+      queueToastTimer.current = null;
+      setQueueToast("");
+    }, 4200);
+  }, []);
+  useEffect(() => {
+    const onToast = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail;
+      if (typeof message === "string" && message) showQueueToast(message);
+    };
+    window.addEventListener(QUEUE_TOAST_EVENT, onToast);
+    return () => {
+      window.removeEventListener(QUEUE_TOAST_EVENT, onToast);
+      if (queueToastTimer.current) window.clearTimeout(queueToastTimer.current);
+    };
+  }, [showQueueToast]);
   const [focus, setFocus] = useState<{id: string; index: number} | null>(null);
   const [remoteHosts, setRemoteHosts] = useState<RemoteHost[]>([]);
   const refreshRemoteHosts = useCallback(async (signal?: AbortSignal) => {
@@ -261,13 +287,13 @@ export function CardQueueShell() {
   const cardHostLabel = (card: QueueCard, workspace?: QueueWorkspace) => {
     const host = hostLabelOf(workspace);
     if (!card.harness) return host;
-    const name = harnessName(card.harness.kind);
+    const name = card.harness.title || harnessName(card.harness.kind);
     return `${host} · ${name}`;
   };
   const visibleHistory = filterHistoricalSessions(history ?? [], cards, historySearch);
   const workspaceOf = (card: QueueCard) => workspaces.find((workspace) => workspace.id === card.workspaceId);
   const displayProject = (card: QueueCard) => workspaceOf(card)?.name || projectOf(card.cwd);
-  const working = cards.filter((card) => card.phase === "working" && !card.detached);
+  const working = cards.filter((card) => card.phase === "working" && !card.detached && !card.harness?.setup);
   const archived = cards.filter((card) => card.archivedAt !== undefined).sort((a, b) => b.archivedAt! - a.archivedAt!);
   const detached = cards.filter((card) => card.detached);
   const scoreTick = useQueueScoreClock(queue);
@@ -304,7 +330,7 @@ export function CardQueueShell() {
   const inspected = cards.find((card) => card.id === inspecting && !card.detached);
   const active = detachedId ? cards.find((card) => card.id === detachedId) : inspected || ready[Math.min(deckIndex, Math.max(0, ready.length - 1))];
   const detachedWindowTitle = detachedId && active
-    ? `${active.harness ? `${harnessName(active.harness.kind)} · ` : ""}${titleOf(active)}`
+    ? `${active.harness ? `${active.harness.title || harnessName(active.harness.kind)} · ` : ""}${titleOf(active)}`
     : null;
   useEffect(() => {
     if (!detachedWindowTitle) return;
@@ -409,12 +435,14 @@ export function CardQueueShell() {
       const side = queueArrivalSide(orderedIds, focusedId, card.id);
       if (!side) continue;
       const key = cardTurnKey(card);
+      const quiet = shouldQuietRearQueueArrival(attentionMode, side, document.visibilityState);
       const fallback = card.harness?.replyPreview
         || (card.harness?.kind === "shell" ? t("harness.commandDone") : t("queue.回复已完成"));
       setArrivalNotices((current) => current.some((notice) => notice.key === key) ? current : [...current, {
         key,
         cardId: card.id,
         side,
+        quiet,
         title: titleOf(card),
         reply: fallback,
       }]);
@@ -428,7 +456,7 @@ export function CardQueueShell() {
         })
         .catch(() => {});
     }
-  }, [queue, detachedId, ready, focus?.id, active?.id, t, titleOf]);
+  }, [queue, detachedId, ready, focus?.id, active?.id, attentionMode, t, titleOf]);
 
   // Replies can arrive after the completion hook. Enrich only the same turn's notice.
   useEffect(() => {
@@ -449,12 +477,13 @@ export function CardQueueShell() {
   const arrivalNotice = arrivalNotices[0];
   const arrivalNoticeKey = arrivalNotice?.key;
   const arrivalNoticeSide = arrivalNotice?.side;
+  const arrivalNoticeQuiet = arrivalNotice?.quiet === true;
   useEffect(() => {
     if (!arrivalNoticeKey || !arrivalNoticeSide) return;
-    playQueueArrivalSound(arrivalNoticeSide);
+    if (!arrivalNoticeQuiet) playQueueArrivalSound(arrivalNoticeSide);
     const timer = window.setTimeout(() => setArrivalNotices((current) => current.slice(1)), 5000);
     return () => window.clearTimeout(timer);
-  }, [arrivalNoticeKey, arrivalNoticeSide, playQueueArrivalSound]);
+  }, [arrivalNoticeKey, arrivalNoticeSide, arrivalNoticeQuiet, playQueueArrivalSound]);
 
   const urgentCard = urgentAlerts ? cards.filter((card) => card.phase === "attention" && card.archivedAt === undefined
     && (detachedId ? card.id === detachedId && canShowDetached : !card.detached)
@@ -484,9 +513,17 @@ export function CardQueueShell() {
     if (!queue || busy || queue.sortMode === mode) return;
     setBusy(true);
     if (active) setFocus({ id: active.id, index: deckIndex });
-    try { await run("sort_mode", { mode }); }
+    try {
+      const result = await run("sort_mode", { mode });
+      if (result) showQueueToast(t(mode === "score" ? "queue.已切换评分排序说明" : "queue.已切换先进先出说明"));
+    }
     finally { setBusy(false); }
-  }, [active, busy, deckIndex, queue, run]);
+  }, [active, busy, deckIndex, queue, run, showQueueToast, t]);
+  const chooseAttentionMode = useCallback((mode: AttentionMode) => {
+    if (mode === attentionMode) return;
+    setAttentionMode(mode);
+    showQueueToast(t(mode === "focus" ? "queue.已切换专注模式说明" : "queue.已切换日常模式说明"));
+  }, [attentionMode, setAttentionMode, showQueueToast, t]);
 
   useEffect(() => {
     if (!detachedId) return;
@@ -567,18 +604,30 @@ export function CardQueueShell() {
     onAdopt(requestedSessionId);
   }, [requestedSessionId, detachedId, onAdopt]);
   useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-    const onNotificationClick = (event: MessageEvent) => {
-      if (event.data?.type !== "notification-click" || typeof event.data.url !== "string") return;
-      const url = new URL(event.data.url, window.location.origin);
+    const openFromNotification = (raw: string) => {
+      const url = new URL(raw, window.location.origin);
       if (url.origin !== window.location.origin) return;
+      const cardId = url.searchParams.get("card");
+      if (cardId) { openDetachedCardTab(cardId); return; }
       const attentionId = url.searchParams.get("attention");
       if (attentionId) { focusNotificationCard(attentionId); return; }
       const sessionId = url.searchParams.get("session");
       if (sessionId && !detachedId) onAdopt(sessionId);
     };
-    navigator.serviceWorker.addEventListener("message", onNotificationClick);
-    return () => navigator.serviceWorker.removeEventListener("message", onNotificationClick);
+    const onServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "notification-click" || typeof event.data.url !== "string") return;
+      openFromNotification(event.data.url);
+    };
+    const onDesktopNotification = (event: Event) => {
+      const url = (event as CustomEvent<{ url?: string }>).detail?.url;
+      if (typeof url === "string") openFromNotification(url);
+    };
+    if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", onServiceWorkerMessage);
+    window.addEventListener("topcard:notification-click", onDesktopNotification);
+    return () => {
+      if ("serviceWorker" in navigator) navigator.serviceWorker.removeEventListener("message", onServiceWorkerMessage);
+      window.removeEventListener("topcard:notification-click", onDesktopNotification);
+    };
   }, [detachedId, onAdopt, focusNotificationCard]);
   const shift = useCallback(async (card = active) => {
     if (!card || detachedId || ready.length < 2 || inspecting) return false;
@@ -670,8 +719,9 @@ export function CardQueueShell() {
                 <div className="cq-card-actions">
                   {!detachedId && <>
                     {!inspecting && <button className="cq-action-defer" onClick={() => requestShift(visibleCard)} disabled={!(visibleCard.session || visibleCard.harness) || (queue?.sortMode !== "score" && ready.at(-1)?.id === visibleCard.id)} aria-label={queue?.sortMode === "score" ? t("queue.清零等待分") : t("queue.稍后")}><Icon name="down" />{queue?.sortMode === "score" && <small>−{cardScore.waiting}</small>}<span className="cq-action-tooltip" role="tooltip">{queue?.sortMode === "score" ? t("queue.扣除当前 Wait，重新计时") : t("queue.稍后")}</span></button>}
-                    <button className="cq-action-popout" onClick={popout} aria-label={t("queue.移出")}><Icon name="maximize" /><span className="cq-action-tooltip" role="tooltip">{t("queue.移出")}</span></button>
-                    {(visibleCard.harness ? visibleCard.archivedAt === undefined : !inspecting && visibleCard.phase !== "working") && <button className="cq-action-archive" aria-label={(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")} onClick={async () => { if (visibleCard.session || visibleCard.harness) {
+                    {(!!visibleCard.session || !!visibleCard.harness) && <button className="cq-action-popout" onClick={popout} aria-label={t("queue.移出")}><Icon name="maximize" /><span className="cq-action-tooltip" role="tooltip">{t("queue.移出")}</span></button>}
+                    {(visibleCard.harness ? visibleCard.archivedAt === undefined : !inspecting && visibleCard.phase !== "working") && <button className="cq-action-archive" aria-label={(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")} onClick={async () => {
+                      if (visibleCard.session || visibleCard.harness) {
                       if (busy) return;
                       if (!skipArchiveConfirmation) { setSkipArchiveChecked(false); setArchiveConfirm(visibleCard); return; }
                       setBusy(true);
@@ -681,11 +731,7 @@ export function CardQueueShell() {
                       return;
                     } const result = await run("remove", { id: visibleCard.id }); if (result) setInspecting(null); }}><Icon name={(visibleCard.session || visibleCard.harness) ? "archive" : "close"} /><span className="cq-action-tooltip" role="tooltip">{(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")}</span></button>}
                   </>}
-                  {(inspecting || detachedId) && <button className="cq-action-archive" aria-label={detachedId ? t("queue.Attach") : t("queue.关闭")} onClick={async () => {
-                    if (detachedId) { returnToQueue(); return; }
-                    if (!(visibleCard.session || visibleCard.harness)) { const result = await run("remove", {id:visibleCard.id}); if (!result) return; }
-                    setInspecting(null);
-                  }}><Icon name={detachedId ? "undo" : "close"} /><span className="cq-action-tooltip" role="tooltip">{detachedId ? t("queue.Attach") : t("queue.关闭")}</span></button>}
+                  {detachedId && <button className="cq-action-archive" aria-label={t("queue.Attach")} onClick={() => returnToQueue()}><Icon name="undo" /><span className="cq-action-tooltip" role="tooltip">{t("queue.Attach")}</span></button>}
                 </div>
                 {layout?.rightToggle}
               </div>
@@ -715,6 +761,10 @@ export function CardQueueShell() {
       {notifications.canOpenSystemSettings && <button type="button" onClick={() => void notifications.openSystemSettings()}>{t("settings.openNotificationSettings")}</button>}
       <button type="button" className="cq-notification-alert-close" aria-label={t("queue.关闭")} onClick={notifications.dismissStatus}>×</button>
     </div>}
+    {!notifications.status && queueToast && <div className="cq-queue-toast" role="status" aria-live="polite">
+      <span>{queueToast}</span>
+      <button type="button" aria-label={t("queue.关闭")} onClick={() => setQueueToast("")}>×</button>
+    </div>}
     {urgentCard?.urgentCall && <UrgentCallDialog key={cardTurnKey(urgentCard)} title={titleOf(urgentCard)} details={urgentCard.urgentCall}
       onDismiss={dismissUrgent} onRead={() => {
         dismissUrgent();
@@ -726,7 +776,12 @@ export function CardQueueShell() {
           else setInspecting(urgentCard.id);
         }
       }} />}
-    <CardTransfers order={ready.map((card) => card.id)} locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" && inspecting !== card.id ? "working" : "attention"]))}>
+    <CardTransfers
+      order={ready.map((card) => card.id)}
+      locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" && inspecting !== card.id ? "working" : "attention"]))}
+      attentionMode={attentionMode}
+      focusedId={focus?.id ?? active?.id}
+    >
     <div className="cq-layout" inert={!!inspected && !detachedId}>
       {!detachedId && <aside className="cq-sidebar">
         <div className="cq-sidebar-brand"><Link className="cq-brand" href="/" aria-label={t("queue.Card Queue 主页")}><span className="cq-logo"><Icon name="stack" size={21} /></span>TopCard</Link><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
@@ -766,6 +821,14 @@ export function CardQueueShell() {
               <button type="button" role="menuitemradio" aria-checked={queue?.sortMode === "fifo"} disabled={busy || !queue} onClick={(event) => { void chooseSortMode("fifo"); event.currentTarget.blur(); }}><span>→</span><span>{t("queue.先进先出")}</span></button>
             </div>
           </div>
+          <div className="cq-toolbar-menu">
+            <button type="button" className="cq-insertion-position cq-attention-mode" aria-haspopup="menu" aria-label={t("queue.切换工作模式")} title={t("queue.切换工作模式")}>{attentionOption.icon} <span className="cq-mode-label">{t(attentionOption.label)}</span></button>
+            <div className="cq-toolbar-popover cq-mode-popover" role="menu" aria-label={t("queue.切换工作模式")}>
+              {ATTENTION_MODES.map((option) => (
+                <button key={option.id} type="button" role="menuitemradio" aria-checked={attentionMode === option.id} onClick={(event) => { chooseAttentionMode(option.id); event.currentTarget.blur(); }}><span>{option.icon}</span><span>{t(option.label)}</span></button>
+              ))}
+            </div>
+          </div>
         </div>}
       {!detachedId && cardSearchItems.length > 0 && <CardQuickSearch items={cardSearchItems} onOpen={(item) => {
         if (item.location === "detached") {
@@ -787,7 +850,7 @@ export function CardQueueShell() {
         {(error || connectionError) && <div className="cq-error" role="alert">{error || connectionError}<button onClick={() => { setError(""); void refresh(); }}>{t("queue.重试")}</button></div>}
         {claimError && <div className="cq-error" role="alert">{claimError}<Link href="/">{t("queue.返回主页面")}</Link></div>}
         <div className="cq-stage" ref={stageRef}>
-          {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{t("queue.正在连接你的 Pi…")}</h2></div> : active && canShowDetached ? <>
+          {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{error || t("queue.正在连接你的 Pi…")}</h2></div> : active && canShowDetached ? <>
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
               : <>
@@ -823,7 +886,7 @@ export function CardQueueShell() {
       </main>
       </div>
     </div>
-    {inspected && !detachedId && <CardInspectionOverlay anchor={stageRef}>{renderCard(inspected)}</CardInspectionOverlay>}
+    {inspected && !detachedId && <CardInspectionOverlay anchor={stageRef} onClose={() => setInspecting(null)}>{renderCard(inspected)}</CardInspectionOverlay>}
     </CardTransfers>
     {creating && <WorkspacePicker workspaces={workspaces} remoteHosts={remoteHosts} busy={busy} onClose={() => setCreating(false)} onAddWorkspace={(machine) => { setCreating(false); setError(""); setWorkspaceThenCreate(true); setWorkspaceFormEntry(machine); setAddingWorkspace(true); }} onManageHosts={() => { setCreating(false); setSettingsSection("remote-hosts"); setSettings(true); }} onUpdate={async (workspaceId, value) => {
       setBusy(true); const result = await run("workspace_update", { workspaceId, ...value }); setBusy(false); return !!result;
@@ -843,7 +906,7 @@ export function CardQueueShell() {
     }} />}
     {deferConfirm && <div className="cq-overlay" onClick={() => !busy && setDeferConfirm(null)}><section className="cq-dialog cq-defer-confirm" role="dialog" aria-modal="true" aria-label={queue?.sortMode === "score" ? t("queue.确认清零等待分") : t("queue.确认沉底")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="down" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setDeferConfirm(null)}><Icon name="close" /></button></div><h2>{queue?.sortMode === "score" ? t("queue.确认清零等待分") : t("queue.确认沉底")}</h2><p>{queue?.sortMode === "score" ? t("queue.Wait 将从零重新累计。") : t("queue.这张卡片将移到队列底部。")}</p><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setDeferConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-defer-confirm-button" disabled={busy} onClick={async () => { setBusy(true); const result = await shift(deferConfirm); setBusy(false); if (result) setDeferConfirm(null); }}>{queue?.sortMode === "score" ? t("queue.清零等待分") : t("queue.沉底")}</button></div></section></div>}
     {archiveConfirm && <div className="cq-overlay" onClick={() => !busy && setArchiveConfirm(null)}><section className="cq-dialog cq-archive-confirm" role="dialog" aria-modal="true" aria-label={t("queue.确认归档")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="archive" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setArchiveConfirm(null)}><Icon name="close" /></button></div><h2>{t("queue.确认归档")}</h2><p>{t("queue.归档后会话将移到历史对话，之后仍可重新打开。")}</p><label className="cq-archive-skip"><input type="checkbox" checked={skipArchiveChecked} disabled={busy} onChange={event => setSkipArchiveChecked(event.target.checked)} /><span>{t("queue.skipArchiveThisPage")}<small>{t("queue.skipArchiveThisPageHint")}</small></span></label><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setArchiveConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { setBusy(true); const result = await run("archive", { id: archiveConfirm.id }); setBusy(false); if (result) { if (skipArchiveChecked) setSkipArchiveConfirmation(true); advanceToNextCard(archiveConfirm.id); setArchiveConfirm(null); } }}>{t("queue.归档")}</button></div></section></div>}
-    {history && <div className="cq-overlay" onClick={() => setHistory(null)}><section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div><h2>{t("queue.历史对话")}</h2><p>{t("queue.已收起的卡片和未在当前队列中的会话，点击即可继续。")}</p><input aria-label="搜索会话" placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><div className="cq-history-list">{archived.filter(card => card.harness && `${titleOf(card)} ${card.cwd}`.toLowerCase().includes(historySearch.toLowerCase())).map(card => <button key={card.id} onClick={() => { setHistory(null); setInspecting(card.id); }}><span>{harnessName(card.harness!.kind)} · {titleOf(card)}</span><small>{projectOf(card.cwd)} · {new Date(card.archivedAt!).toLocaleDateString()}</small></button>)}{visibleHistory.map((session) => <button key={session.id} onClick={() => onAdopt(session.id)}><span>Pi · {session.name || session.firstMessage || t("queue.未命名会话")}</span><small>{projectOf(session.cwd)} · {new Date(session.modified).toLocaleDateString()}</small></button>)}{!visibleHistory.length && <p>{historySearch ? t("queue.没有匹配的历史对话。") : t("queue.暂无未在队列中的历史对话。")}</p>}</div></section></div>}
+    {history && <div className="cq-overlay" onClick={() => setHistory(null)}><section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div><h2>{t("queue.历史对话")}</h2><p>{t("queue.已收起的卡片和未在当前队列中的会话，点击即可继续。")}</p><input aria-label="搜索会话" placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><div className="cq-history-list">{archived.filter(card => card.harness && `${titleOf(card)} ${card.cwd}`.toLowerCase().includes(historySearch.toLowerCase())).map(card => <button key={card.id} onClick={() => { setHistory(null); setInspecting(card.id); }}><span>{(card.harness!.title || harnessName(card.harness!.kind))} · {titleOf(card)}</span><small>{projectOf(card.cwd)} · {new Date(card.archivedAt!).toLocaleDateString()}</small></button>)}{visibleHistory.map((session) => <button key={session.id} onClick={() => onAdopt(session.id)}><span>Pi · {session.name || session.firstMessage || t("queue.未命名会话")}</span><small>{projectOf(session.cwd)} · {new Date(session.modified).toLocaleDateString()}</small></button>)}{!visibleHistory.length && <p>{historySearch ? t("queue.没有匹配的历史对话。") : t("queue.暂无未在队列中的历史对话。")}</p>}</div></section></div>}
     {settings && <SettingsPanel cwd={active?.cwd || defaultCwd || null} sessionId={active?.session?.id || null} initialSection={settingsSection} onClose={() => { setSettings(false); setModelsRefreshKey((key) => key + 1); void refreshRemoteHosts(); }} onSessionReloaded={() => { setSessionRefreshKey((key) => key + 1); void refresh(); }} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={setQuoteSelectionEnabled} />}
     {file && <div className="cq-overlay" onClick={() => setFile(null)}><section className="cq-file-panel" onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><span>{file}</span><button aria-label={t("queue.关闭文件预览")} onClick={() => setFile(null)}><Icon name="close" /></button></div><FileViewer filePath={file} cwd={active?.cwd} sourceSessionId={active?.session?.id} onOpenFile={setFile} /></section></div>}
   </div>;

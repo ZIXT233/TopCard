@@ -13,7 +13,9 @@ SSH 工作区的 CLI 版本检测、实际启动和 Node 状态探针使用远�
 
 `npm run desktop:package`
 
-构建脚本复制代码和依赖到系统临时目录，在那里构建生产版，不改工作区的 `.next`。产物在 `build/releases`，macOS 为 `mac-arm64/TopCard.app`（Intel 为 `mac/TopCard.app`）。
+桌面构建在仓库内写入独立的 `.next-desktop`（不碰开发用的 `.next`），并按源码/锁文件指纹复用 `build/desktop-runtime`。无改动时 `desktop:build` 应秒级结束；改代码后 webpack 可走该缓存。强制重编：`npm run desktop:build:force`。日常迭代用 `desktop:build` + `desktop:start`，不必每次打 NSIS 安装包。
+Webpack 生产构建默认给 Node **16GB** 堆（同时写入进程参数与 `NODE_OPTIONS`）。若仍 OOM，可再抬高：PowerShell 下 `$env:TOPCARD_DESKTOP_HEAP_MB="20480"` 后重跑。
+产物在 `build/releases`，macOS 为 `mac-arm64/TopCard.app`（Intel 为 `mac/TopCard.app`）。
 `npm run desktop:build` 只准备后端；`npm run desktop:start` 使用该后端运行桌面。
 
 生产后端通过 Electron `utilityProcess` 复用 Electron 内置的 Node，不再携带第二套 Node 运行时，也不会把常驻服务注册成第二个 Dock 应用。少量服务端辅助脚本仍通过 `ELECTRON_RUN_AS_NODE` 短时复用同一运行时。Next standalone 运行目录保留标准 `node_modules`，只有打包时才复制到临时目录并暂存为 `runtime/modules` 以绕过 electron-builder 的 extraResources 过滤，完成应用目录后恢复为标准的 `runtime/node_modules`，让 CommonJS 和 ESM 都能正常解析。构建不会把开发目录的 node-pty 重编译成 Electron ABI；其目标平台预编译模块必须能被 Electron 内置 Node 加载。首次构建可能需要联网获取 Next 字体。构建必须在目标平台/架构上运行并安装其依赖；当前本机验证 macOS Apple Silicon。Windows 提供 NSIS 配置，Linux 提供 AppImage 配置，需要各平台验证。当前 macOS 产物具有本地 ad-hoc 应用签名，以满足系统通知的身份要求；尚未 Developer ID 签名及公证。
@@ -27,7 +29,7 @@ SSH 工作区的 CLI 版本检测、实际启动和 Node 状态探针使用远�
 - 首次启动会通过原生测试通知触发系统权限流程。菜单「通知」提供再次申请/测试和系统通知设置入口；已被系统拒绝时需在系统设置中重新允许。完成通知沿用现有开关，点击后显示窗口并跳转对应卡片。网页权限 granted 不等于系统允许横幅；系统勿扰/通知权限仍由系统控制。
 - 生产后端绑定随机 loopback 端口，由主进程为本应用发往该端口的请求自动附加内部认证，启动时生成密钥；Cookie 被清理也不要求用户登录；渲染器保持 sandbox/contextIsolation，不能直接调用 Node。
 - Pi 与 CLI 的原始会话继续使用各自用户目录。队列、SSH 配置、终端记录在 Electron userData 的 `.topcard` 下（macOS：`~/Library/Application Support/TopCard/.topcard`）；开发环境仍在项目 `.topcard` 下。不会自动覆盖任何已有桌面队列。
-- 服务日志位于 userData 的 `logs/server.log`。桌面浏览器偏好独立于 Safari。
+- 日志在 userData 的 `logs/`：`main.log` 是 Electron 主进程时间线（后端就绪、窗口加载），`server.log` 是 Next 后端 stdout/stderr。打包应用可加 `--enable-logging` 或环境变量 `TOPCARD_DESKTOP_DEBUG=1`，额外写出 `chromium.log`。菜单「视图 → 切换开发者工具」可看渲染器 Network。Windows 路径一般为 `%APPDATA%\TopCard\logs`。
 
 ## 设置持久化与回归
 

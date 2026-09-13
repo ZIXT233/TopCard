@@ -1,4 +1,5 @@
 "use client";
+import { ModelSetupOverlay } from "./ModelSetupOverlay";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -810,8 +811,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       modelList={modelList}
       modelError={modelError}
       newSessionModelBlock={newSessionModelBlock}
-      onOpenModelSettings={newSessionModelStatus !== "loading" ? onOpenModelSettings : undefined}
-      onRetryModels={newSessionModelStatus === "empty" || newSessionModelStatus === "error" ? retryModels : undefined}
       modelScopeWarnings={modelScopeWarnings}
       onModelChange={handleModelChange}
       modelSwitching={modelSwitching}
@@ -867,6 +866,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <ModelSetupOverlay status={newSessionModelStatus} message={newSessionModelBlock} onOpenSettings={onOpenModelSettings} onRetry={retryModels} />
+      <div className="contents" inert={!!newSessionModelBlock}>
       {isDragOver && (
         <div className="pointer-events-none absolute inset-0 z-50 flex animate-[drop-zone-in_0.15s_ease_both] items-center justify-center bg-[rgba(37,99,235,0.06)] backdrop-blur-[1px]">
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -1275,6 +1276,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
       </div>
       {isEmptyNew && <div className="min-h-0 flex-1" />}
+      </div>
     </div>
   );
 }

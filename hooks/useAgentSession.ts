@@ -302,7 +302,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const { t } = useI18n();
   const modelRequestKey = JSON.stringify([newSessionCwd ?? session?.cwd ?? "", modelsRefreshKey]);
   const [modelAvailability, setModelAvailability] = useState<{ key: string; status: "ready" | "empty" | "error" } | null>(null);
-  const newSessionModelStatus = !isNew ? "ready" : modelAvailability?.key === modelRequestKey ? modelAvailability.status : "loading";
+  const newSessionModelStatus: "ready" | "loading" | "empty" | "error" = !isNew ? "ready" : modelAvailability?.key === modelRequestKey ? modelAvailability.status : "loading";
   const newSessionModelBlock = newSessionModelStatus === "ready" ? null : t(
     newSessionModelStatus === "loading" ? "chat.modelsLoading" : newSessionModelStatus === "error" ? "chat.modelsUnavailable" : "chat.noAvailableModels"
   );

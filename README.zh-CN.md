@@ -36,7 +36,18 @@ CLI 工具需要在实际运行的机器上安装并完成认证。状态反馈�
 
 在应用中添加工作区，创建卡片，选择 CLI Harness 或 Pi 原生会话。也可以将已有 Pi 会话接入队列。`Cmd/Ctrl + J` 打开创建窗口，`Cmd/Ctrl + ]` 将当前卡片放到队尾。
 
-从源码运行需要 **Node.js >= 22.19.0** 和 npm：
+### npm（浏览器）
+
+需要 **Node.js >= 22.19.0**：
+
+```bash
+npm install -g topcard
+topcard
+```
+
+打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。这是与 Electron 安装包并列的第二种发行方式；不包含桌面托盘与独立卡片窗口。
+
+### 从源码开发
 
 ```bash
 npm ci
@@ -74,7 +85,7 @@ npm run desktop:package
 
 请在目标操作系统和架构上构建：当前流程包含 `node-pty` 等原生依赖，不支持保证跨平台构建。macOS 安装包目前采用本地 ad-hoc 签名，尚未公证。
 
-桌面构建在临时目录中进行，不会改动开发服务使用的 `.next`，可以与 `npm run dev` 并行。临时复制依赖需要额外磁盘空间；首次构建可能下载字体、Electron 或打包工具。
+桌面构建写入独立的 `.next-desktop`，不改开发服务的 `.next`，可与 `npm run dev` 并行。输入未变时复用已有 `build/desktop-runtime`；首次或强制构建仍会跑完整 Next 生产构建。安装包阶段的 NSIS 压缩无法靠这份缓存跳过。
 
 如果只需构建并运行生产桌面，不生成安装包：
 
@@ -85,17 +96,18 @@ npm run desktop:start
 
 运行产物位于 `build/desktop-runtime/`，会启动自己的后端；修改应用代码后需重新构建。实现细节见[桌面开发说明](desktop/README.md)。
 
-### 浏览器生产版
+### 浏览器生产版 / npm 包
 
 在没有运行开发服务的独立目录中执行：
 
 ```bash
 npm ci
 npm run build
-npm run start
+npm start
+# 或：npx topcard
 ```
 
-打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。此构建会写入当前目录的 `.next`，不要与同目录的开发服务同时运行。
+打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。此构建会写入当前目录的 `.next`，不要与同目录的开发服务同时运行。`npm publish` 会通过 `prepublishOnly` 先执行生产构建，并把 `.next` 打进 `topcard` 包。
 
 ## 数据与运行周期
 

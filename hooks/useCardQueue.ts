@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { markQueueCardWorking, mergeQueueSnapshot } from "@/lib/card-queue-snapshot";
+import { markQueueCardWorking, mergeQueueSnapshot, queueFallbackPollMs, queuePollIntervalMs } from "@/lib/card-queue-snapshot";
 import type { CardQueue } from "@/lib/card-queue";
 import type { SessionInfo } from "@/lib/types";
 
@@ -17,9 +17,11 @@ export function useCardQueue() {
   const [defaultCwd, setDefaultCwd] = useState("");
   const [error, setError] = useState("");
   const mounted = useRef(false);
+  const bootstrapped = useRef(false);
   const localGeneration = useRef(0);
   const lifetime = useRef(0);
   const pendingWorking = useRef(new Map<string, SessionInfo | undefined>());
+  const queueRef = useRef<CardQueue | null>(null);
   const request = useRef<{ generation: number; controller: AbortController; promise: Promise<void> } | null>(null);
   const accept = useCallback((next: CardQueue & { defaultCwd?: string }) => {
     if (!mounted.current) return;
@@ -33,9 +35,10 @@ export function useCardQueue() {
       for (const [cardId, session] of pendingWorking.current) {
         merged = markQueueCardWorking(merged, cardId, session);
       }
+      queueRef.current = merged;
       return merged;
     });
-    if (next.defaultCwd) setDefaultCwd(next.defaultCwd);
+    if (next.defaultCwd) setDefaultCwd((current) => current === next.defaultCwd ? current : next.defaultCwd!);
   }, []);
   const refresh = useCallback((): Promise<void> => {
     if (!mounted.current) return Promise.resolve();
@@ -45,19 +48,22 @@ export function useCardQueue() {
     const controller = new AbortController();
     const current = { generation, controller, promise: Promise.resolve() };
     request.current = current;
+    const bootstrap = !bootstrapped.current;
     current.promise = (async () => {
       try {
-        const response = await fetch("/api/card-queue", { cache: "no-store", signal: controller.signal });
+        const response = await fetch(bootstrap ? "/api/card-queue/bootstrap" : "/api/card-queue", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) });
         const data = await readJsonResponse<CardQueue & { defaultCwd?: string; error?: string }>(response);
         if (controller.signal.aborted || generation !== localGeneration.current) return;
         if (!response.ok) throw new Error(data.error || "无法连接 Pi");
         accept(data);
-        if (mounted.current) setError("");
+        bootstrapped.current = true;
+        if (mounted.current) setError((current) => current ? "" : current);
       } catch (error) {
         if (!controller.signal.aborted && mounted.current && generation === localGeneration.current)
-          setError(error instanceof Error ? error.message : String(error));
+          setError(error instanceof Error && error.name === "TimeoutError" ? "读取卡片队列超时，请重试。" : error instanceof Error ? error.message : String(error));
       } finally {
         if (request.current === current) request.current = null;
+        if (bootstrap && bootstrapped.current && !controller.signal.aborted) void refresh();
       }
     })();
     return current.promise;
@@ -67,7 +73,11 @@ export function useCardQueue() {
     localGeneration.current += 1;
     if (pendingAttachment) pendingWorking.current.set(cardId, session);
     else pendingWorking.current.delete(cardId);
-    setQueue((current) => current ? markQueueCardWorking(current, cardId, session) : current);
+    setQueue((current) => {
+      const next = current ? markQueueCardWorking(current, cardId, session) : current;
+      queueRef.current = next;
+      return next;
+    });
     if (!pendingAttachment) void refresh();
   }, [refresh]);
   const rollbackWorking = useCallback((cardId: string) => {
@@ -100,12 +110,19 @@ export function useCardQueue() {
     lifetime.current += 1;
     let disposed = false;
     let cycle = 0;
+    let live = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const events = new EventSource("/api/card-queue/events");
+    events.onopen = () => { live = true; };
+    events.onmessage = () => { if (!disposed) void refresh(); };
+    events.onerror = () => { live = events.readyState !== EventSource.CLOSED; };
     const poll = async (owner: number) => {
       if (disposed) return;
       await refresh();
       if (!disposed && owner === cycle)
-        timer = setTimeout(() => void poll(owner), document.visibilityState === "visible" ? 1200 : 3000);
+        timer = setTimeout(() => void poll(owner), live
+          ? queueFallbackPollMs(document.visibilityState === "visible", true)
+          : queuePollIntervalMs(queueRef.current, document.visibilityState === "visible"));
     };
     const reconcile = () => {
       clearTimeout(timer);
@@ -120,6 +137,7 @@ export function useCardQueue() {
       mounted.current = false;
       lifetime.current += 1;
       clearTimeout(timer);
+      events.close();
       request.current?.controller.abort();
       request.current = null;
       window.removeEventListener("online", reconcile);
