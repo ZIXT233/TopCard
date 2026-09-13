@@ -293,7 +293,7 @@ export function CardQueueShell() {
   const visibleHistory = filterHistoricalSessions(history ?? [], cards, historySearch);
   const workspaceOf = (card: QueueCard) => workspaces.find((workspace) => workspace.id === card.workspaceId);
   const displayProject = (card: QueueCard) => workspaceOf(card)?.name || projectOf(card.cwd);
-  const working = cards.filter((card) => card.phase === "working" && !card.detached && !card.harness?.setup);
+  const working = cards.filter((card) => card.phase === "working" && !card.detached);
   const archived = cards.filter((card) => card.archivedAt !== undefined).sort((a, b) => b.archivedAt! - a.archivedAt!);
   const detached = cards.filter((card) => card.detached);
   const scoreTick = useQueueScoreClock(queue);
